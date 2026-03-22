@@ -1,0 +1,166 @@
+{
+  "theme": "dark_and_light",
+  "typography": {
+    "headings": "Manrope, sans-serif",
+    "body": "DM Sans, sans-serif",
+    "import_url": "https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Manrope:wght@400;500;600;700;800&display=swap",
+    "rules": [
+      "Headings (h1-h4) must use 'Manrope' font-family.",
+      "Headings size > 24px MUST use tight letter spacing: 'tracking-tight'.",
+      "Body text must use 'DM Sans'.",
+      "Overlines / Labels MUST be Uppercase + text-xs + Wide Spacing ('tracking-widest').",
+      "Line Height: Tight ('leading-none') for headers, Loose ('leading-relaxed') for body.",
+      "BANNED: Do not use Inter, Roboto, or standard sans-serif for headings."
+    ]
+  },
+  "colors": {
+    "primary": "Indigo",
+    "strategy": "Archetype 4 (Swiss & High-Contrast) + Soft Utility Dashboard. Clean, functional, and objective.",
+    "css_variables_light": {
+      "--background": "240 20% 98%",
+      "--foreground": "240 10% 10%",
+      "--card": "0 0% 100%",
+      "--card-foreground": "240 10% 10%",
+      "--popover": "0 0% 100%",
+      "--popover-foreground": "240 10% 10%",
+      "--primary": "243 75% 59%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "240 5% 96%",
+      "--secondary-foreground": "240 10% 10%",
+      "--muted": "240 5% 96%",
+      "--muted-foreground": "240 5% 45%",
+      "--accent": "240 5% 96%",
+      "--accent-foreground": "240 10% 10%",
+      "--destructive": "0 84% 60%",
+      "--destructive-foreground": "0 0% 98%",
+      "--border": "240 5% 85%",
+      "--input": "240 5% 85%",
+      "--ring": "243 75% 59%",
+      "--radius": "0.75rem"
+    },
+    "css_variables_dark": {
+      "--background": "240 10% 4%",
+      "--foreground": "240 10% 98%",
+      "--card": "240 10% 6%",
+      "--card-foreground": "240 10% 98%",
+      "--popover": "240 10% 6%",
+      "--popover-foreground": "240 10% 98%",
+      "--primary": "243 75% 65%",
+      "--primary-foreground": "240 10% 4%",
+      "--secondary": "240 10% 15%",
+      "--secondary-foreground": "240 10% 98%",
+      "--muted": "240 10% 15%",
+      "--muted-foreground": "240 5% 65%",
+      "--accent": "240 10% 15%",
+      "--accent-foreground": "240 10% 98%",
+      "--destructive": "0 62% 30%",
+      "--destructive-foreground": "0 0% 98%",
+      "--border": "240 10% 15%",
+      "--input": "240 10% 15%",
+      "--ring": "243 75% 65%"
+    },
+    "rules": [
+      "Use primary color (Indigo) explicitly for primary CTAs, active states, and focus rings.",
+      "Use 'Tinted Grey' rule: Neutral greys are tinted with slight blue/indigo (e.g. hue 240) to feel alive.",
+      "CRITICAL: Do NOT use generic full-screen gradients. Dashboard color is for function and guidance only."
+    ]
+  },
+  "visual_enhancers": {
+    "shadows": [
+      "Use layered ambient shadows rather than harsh drop shadows.",
+      "Hover effect for dashboard cards: '-translate-y-1', 'shadow-lg', 'shadow-black/5' (light) or 'shadow-white/5' (dark)."
+    ],
+    "glassmorphism": [
+      "For sticky headers, navs, overlays: use 'bg-background/80', 'backdrop-blur-xl', 'border-b', 'border-border/40'.",
+      "CRITICAL: Do not use complete transparent backgrounds without a blur/scrim when content scrolls underneath."
+    ],
+    "borders": [
+      "GRID BORDERS: Use subtle 1px 'border-border' to expose skeleton logic (e.g. calendar cells, separated dashboard widgets)."
+    ]
+  },
+  "layouts": {
+    "grid_strategy": "High Density Grid (For Dashboards). Base Grid: grid-cols-1 md:grid-cols-4. Gap: tight (gap-4 or gap-6).",
+    "dashboard_anatomy": "Fixed left sidebar (w-64) for main navigation. Main content area (flex-1). Collapsible right sidebar (w-72 or w-80) for the Task Planner / Upcoming events.",
+    "responsive": "Mobile-First: Always start with 'grid-cols-1'. Hide sidebars on mobile, use bottom sheet or hamburger menu for navigation. Ensure PWA full-screen optimization.",
+    "calendar_grid": "Month view uses pure 7-column CSS grid. Day/Week view uses fixed left-axis for time. Handle overflow gracefully with '+N more' indicators or popovers.",
+    "spacing": "Generous spacing. Use p-6 or p-8 for main layout containers to let the high-density grid breathe.",
+    "rules": [
+      "Mobile constraints: Images or big calendar grids MUST NOT exceed screen boundaries without proper scrolling.",
+      "Grid Children: Grid items MUST be direct children of the grid container.",
+      "Optical alignment: Use proper padding to visually center text near icons."
+    ]
+  },
+  "components": {
+    "calendar": "Custom UI built using 'date-fns' for logic. Use raw div/span structures styled with Tailwind. Dropdowns for View Selection (Month/Week/Day).",
+    "task_planner": "Vertical dense list within the right sidebar. Custom checkboxes. Strike-through animation for completed tasks.",
+    "event_modal": "Shadcn Dialog. Form inputs via Shadcn Input, Select, and Calendar for date-picking.",
+    "booking_link": "Marketing-style public view. Focused center card. Clean typography. Easy time-slot selection.",
+    "navigation": "Clean pill-shaped active states for sidebar links ('bg-primary/10 text-primary' or 'bg-muted').",
+    "theme_toggle": "Shadcn Toggle or Dropdown Menu.",
+    "icons": "Use 'lucide-react' for all standard UI icons."
+  },
+  "motion": {
+    "rules": [
+      "Micro-interactions on hover for all buttons/links (e.g., 'transition-colors duration-200').",
+      "Staggered entrance for task items in the planner.",
+      "Modals must use smooth Shadcn fade-in/zoom-in.",
+      "Respect 'prefers-reduced-motion'."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "Minimum 4.5:1 contrast ratio for normal text (WCAG AA).",
+      "Hover states must always explicitly set text/bg color (e.g. 'hover:bg-primary/90').",
+      "Focus States must have higher contrast ('focus:ring-2 focus:ring-primary focus:outline-none focus:ring-offset-2 focus:ring-offset-background').",
+      "CRITICAL: All interactive and key informational elements MUST include a 'data-testid' attribute (e.g., data-testid='login-button', data-testid='calendar-day-15')."
+    ]
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "user_avatar",
+        "description": "Elegant headshot of a professional woman in a black outfit, showcasing confidence and style."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85",
+        "category": "user_avatar",
+        "description": "Man in white shirt smiling against a grey background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85",
+        "category": "user_avatar",
+        "description": "Man wearing grey jacket"
+      }
+    ],
+    "rules": [
+      "Use avatars for the 'Invite People' section, collaborative task planner list, and user profile header.",
+      "Always set 'object-cover' and 'rounded-full' on avatar images."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "1. Replace frontend CSS: Overwrite index.css with the provided CSS variables and font imports (@import url for DM Sans & Manrope). Remove generic .App styling and centering from App.css.",
+    "2. Setup the Layout: Implement a global Dashboard Layout component with a fixed left navigation sidebar, flexible main content area, and a collapsible right sidebar for the Task Planner. Ensure mobile view hides sidebars into a hamburger menu and handles PWA safely.",
+    "3. Implement the Core Calendar: Build the Interactive Calendar view using 'date-fns'. Needs to support Monthly, Weekly, and Daily views. Toggle these views via a Shadcn Dropdown or Tabs.",
+    "4. Component Customization: Integrate Shadcn UI components (Dialog, Input, Select, Calendar, Tabs). Override default border radius to match the design (--radius: 0.75rem). Use flat, rectangular, dense styles.",
+    "5. Form & Modals: Build 'Create Event/Task modal' with 'Invite People' functionality. Use avatar images provided in the guidelines for invitees.",
+    "6. Booking Link: Create a shareable, Calendly-like 'Booking Link View'. Clean, uncluttered layout centered around availability selection.",
+    "7. Authentication: Build standard Google Auth + JWT Email/Password Login page. Use a sleek, minimalist split-screen or centered card design.",
+    "8. Testability: Rigorously enforce 'data-testid' on ALL interactive elements."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy and glass-morphism effects (backdrop-blur-xl).",
+    "You MUST NOT apply universal transition (e.g., transition: all). Always add transitions for specific interactive elements excluding transforms.",
+    "You MUST NOT center align the app container, i.e., do not add '.App { text-align: center; }' in the css file.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER: use AI assistant Emoji characters for icons. Use lucide-react.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Missing categories (especially avatars) = main agent will use placeholder text which is FORBIDDEN. Use the provided image_urls.",
+    "Components MUST use named exports (export const ComponentName = ...). Pages MUST use default exports.",
+    "Use 'sonner' for toast notifications."
+  ]
+}
