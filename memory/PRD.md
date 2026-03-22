@@ -46,6 +46,15 @@ Build a modern, responsive web app combining Calendly scheduling, Google Calenda
 - Responsive layout with mobile hamburger menu
 - All tests passing (100% backend, 95% frontend)
 
+## Update (2026-03-22 - Phase 2)
+- PWA Service Worker with offline-first caching (network-first for API, cache-first for static)
+- Recurring events (daily/weekly/monthly) with calendar expansion and repeat indicators
+- Drag-and-drop event rescheduling across all calendar views (month/week/day)
+- Share Your Planora page with professional dark indigo card, QR code, PNG download, copy link, embed code
+- Backend updated with recurrence field on events
+- Seed data includes recurring events (Team Standup=daily, 1:1 with Sarah=weekly)
+- All tests passing (100% backend 28/28, 95% frontend)
+
 ## Prioritized Backlog
 ### P0 (Critical - Next)
 - Service worker for offline PWA support
