@@ -40,6 +40,7 @@ class EventCreate(BaseModel):
     end_time: str
     color: Optional[str] = "indigo"
     attendees: Optional[List[Dict]] = []
+    recurrence: Optional[Dict] = None  # {type: "none"|"daily"|"weekly"|"monthly", end_date: "ISO"}
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -48,6 +49,7 @@ class EventUpdate(BaseModel):
     end_time: Optional[str] = None
     color: Optional[str] = None
     attendees: Optional[List[Dict]] = None
+    recurrence: Optional[Dict] = None
 
 class TaskCreate(BaseModel):
     title: str
@@ -268,6 +270,7 @@ async def create_event(data: EventCreate, request: Request):
         "end_time": data.end_time,
         "color": data.color,
         "attendees": data.attendees,
+        "recurrence": data.recurrence,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.events.insert_one(event_doc)
@@ -514,6 +517,7 @@ async def seed_data(request: Request):
             "start_time": (today + timedelta(hours=9)).isoformat(),
             "end_time": (today + timedelta(hours=9, minutes=30)).isoformat(),
             "color": "indigo",
+            "recurrence": {"type": "daily", "end_date": (today + timedelta(days=30)).isoformat()},
             "attendees": [
                 {"name": "Sarah Chen", "email": "sarah@example.com", "status": "accepted",
                  "avatar": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"},
@@ -563,6 +567,7 @@ async def seed_data(request: Request):
             "start_time": (today + timedelta(hours=15)).isoformat(),
             "end_time": (today + timedelta(hours=15, minutes=30)).isoformat(),
             "color": "sky",
+            "recurrence": {"type": "weekly", "end_date": (today + timedelta(days=60)).isoformat()},
             "attendees": [
                 {"name": "Sarah Chen", "email": "sarah@example.com", "status": "accepted",
                  "avatar": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"}

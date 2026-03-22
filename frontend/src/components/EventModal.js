@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, X, Search, Users } from "lucide-react";
+import { Trash2, X, Search, Users, Repeat } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +55,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [attendees, setAttendees] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState("none");
+  const [recurrenceEnd, setRecurrenceEnd] = useState("");
 
   useEffect(() => {
     if (event) {
@@ -64,6 +66,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setEndTime(event.end_time ? event.end_time.slice(0, 16) : "");
       setColor(event.color || "indigo");
       setAttendees(event.attendees || []);
+      setRecurrenceType(event.recurrence?.type || "none");
+      setRecurrenceEnd(event.recurrence?.end_date ? event.recurrence.end_date.slice(0, 10) : "");
     } else if (selectedDate) {
       setTitle("");
       setDescription("");
@@ -75,6 +79,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setEndTime(format(d, "yyyy-MM-dd'T'HH:mm"));
       setColor("indigo");
       setAttendees([]);
+      setRecurrenceType("none");
+      setRecurrenceEnd("");
     }
     setSearchQuery("");
     setShowSearch(false);
@@ -82,6 +88,9 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
 
   const handleSubmit = () => {
     if (!title.trim() || !startTime || !endTime) return;
+    const recurrence = recurrenceType !== "none"
+      ? { type: recurrenceType, end_date: recurrenceEnd ? new Date(recurrenceEnd).toISOString() : null }
+      : null;
     const data = {
       title: title.trim(),
       description,
@@ -89,9 +98,11 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       end_time: new Date(endTime).toISOString(),
       color,
       attendees,
+      recurrence,
     };
+    const targetId = event?.original_event_id || event?.event_id;
     if (event) {
-      onUpdate(event.event_id, data);
+      onUpdate(targetId, data);
     } else {
       onCreate(data);
     }
@@ -188,6 +199,35 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                 />
               ))}
             </div>
+          </div>
+
+          {/* Recurrence */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Repeat className="h-3.5 w-3.5" /> Repeat
+            </Label>
+            <Select value={recurrenceType} onValueChange={setRecurrenceType}>
+              <SelectTrigger data-testid="event-recurrence-select">
+                <SelectValue placeholder="Does not repeat" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Does not repeat</SelectItem>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+            {recurrenceType !== "none" && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Ends on (optional)</Label>
+                <Input
+                  data-testid="event-recurrence-end-input"
+                  type="date"
+                  value={recurrenceEnd}
+                  onChange={(e) => setRecurrenceEnd(e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Invite People */}

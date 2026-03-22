@@ -169,7 +169,7 @@ class PlanoraTester:
         if events is None:
             return False
 
-        # Test CREATE event
+        # Test CREATE regular event
         event_data = {
             "title": "Test Event",
             "description": "Test event description",
@@ -213,6 +213,116 @@ class PlanoraTester:
             f"events/{event_id}",
             200
         )
+        
+        return True
+
+    def test_recurring_events(self):
+        """Test recurring events functionality"""
+        # Test CREATE recurring event - daily
+        daily_event_data = {
+            "title": "Daily Standup Test",
+            "description": "Test daily recurring event",
+            "start_time": (datetime.now() + timedelta(hours=3)).isoformat(),
+            "end_time": (datetime.now() + timedelta(hours=3, minutes=30)).isoformat(),
+            "color": "emerald",
+            "attendees": [],
+            "recurrence": {
+                "type": "daily",
+                "end_date": (datetime.now() + timedelta(days=7)).isoformat()
+            }
+        }
+        
+        daily_event = self.run_test(
+            "Create Daily Recurring Event",
+            "POST",
+            "events",
+            200,
+            data=daily_event_data
+        )
+        
+        if not daily_event:
+            return False
+            
+        # Verify recurrence field is stored
+        if daily_event.get('recurrence', {}).get('type') != 'daily':
+            self.log_test("Verify Daily Recurrence Storage", False, "Recurrence type not stored correctly")
+            return False
+        else:
+            self.log_test("Verify Daily Recurrence Storage", True, "")
+
+        # Test CREATE recurring event - weekly
+        weekly_event_data = {
+            "title": "Weekly Meeting Test",
+            "description": "Test weekly recurring event",
+            "start_time": (datetime.now() + timedelta(hours=4)).isoformat(),
+            "end_time": (datetime.now() + timedelta(hours=5)).isoformat(),
+            "color": "sky",
+            "attendees": [],
+            "recurrence": {
+                "type": "weekly",
+                "end_date": (datetime.now() + timedelta(weeks=4)).isoformat()
+            }
+        }
+        
+        weekly_event = self.run_test(
+            "Create Weekly Recurring Event",
+            "POST",
+            "events",
+            200,
+            data=weekly_event_data
+        )
+        
+        if not weekly_event:
+            return False
+            
+        # Verify recurrence field is stored
+        if weekly_event.get('recurrence', {}).get('type') != 'weekly':
+            self.log_test("Verify Weekly Recurrence Storage", False, "Recurrence type not stored correctly")
+            return False
+        else:
+            self.log_test("Verify Weekly Recurrence Storage", True, "")
+
+        # Test CREATE recurring event - monthly
+        monthly_event_data = {
+            "title": "Monthly Review Test",
+            "description": "Test monthly recurring event",
+            "start_time": (datetime.now() + timedelta(hours=5)).isoformat(),
+            "end_time": (datetime.now() + timedelta(hours=6)).isoformat(),
+            "color": "violet",
+            "attendees": [],
+            "recurrence": {
+                "type": "monthly",
+                "end_date": (datetime.now() + timedelta(days=90)).isoformat()
+            }
+        }
+        
+        monthly_event = self.run_test(
+            "Create Monthly Recurring Event",
+            "POST",
+            "events",
+            200,
+            data=monthly_event_data
+        )
+        
+        if not monthly_event:
+            return False
+            
+        # Verify recurrence field is stored
+        if monthly_event.get('recurrence', {}).get('type') != 'monthly':
+            self.log_test("Verify Monthly Recurrence Storage", False, "Recurrence type not stored correctly")
+            return False
+        else:
+            self.log_test("Verify Monthly Recurrence Storage", True, "")
+
+        # Clean up test events
+        for event in [daily_event, weekly_event, monthly_event]:
+            if event and event.get('event_id'):
+                self.run_test(
+                    f"Delete Recurring Event {event['event_id']}",
+                    "DELETE",
+                    f"events/{event['event_id']}",
+                    200
+                )
         
         return True
 
@@ -387,6 +497,7 @@ class PlanoraTester:
             self.test_auth_me()
             self.test_seed_data()
             self.test_events_crud()
+            self.test_recurring_events()
             self.test_tasks_crud()
             self.test_availability()
             self.test_booking_endpoints()

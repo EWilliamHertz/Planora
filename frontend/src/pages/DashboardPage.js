@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +24,11 @@ import {
   subWeeks,
   addDays,
   subDays,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
 } from "date-fns";
 import { toast } from "sonner";
 
@@ -175,6 +180,52 @@ export default function DashboardPage() {
 
   const goToToday = () => setCurrentDate(new Date());
 
+  // Expand recurring events for current view range
+  const displayEvents = useMemo(() => {
+    const viewStart = subMonths(startOfMonth(currentDate), 1);
+    const viewEnd = addMonths(endOfMonth(currentDate), 1);
+    const expanded = [];
+
+    events.forEach((event) => {
+      expanded.push(event);
+      const rec = event.recurrence;
+      if (!rec || !rec.type || rec.type === "none") return;
+
+      const eventStart = parseISO(event.start_time);
+      const eventEnd = parseISO(event.end_time);
+      const duration = eventEnd.getTime() - eventStart.getTime();
+      const recEnd = rec.end_date ? parseISO(rec.end_date) : addMonths(eventStart, 3);
+
+      let current = new Date(eventStart);
+      let safety = 0;
+      while (safety < 400) {
+        safety++;
+        if (rec.type === "daily") current = addDays(current, 1);
+        else if (rec.type === "weekly") current = addWeeks(current, 1);
+        else if (rec.type === "monthly") current = addMonths(current, 1);
+        else break;
+
+        if (current > recEnd || current > viewEnd) break;
+        if (current >= viewStart) {
+          expanded.push({
+            ...event,
+            event_id: `${event.event_id}_${format(current, "yyyyMMddHHmm")}`,
+            start_time: current.toISOString(),
+            end_time: new Date(current.getTime() + duration).toISOString(),
+            is_recurring_instance: true,
+            original_event_id: event.event_id,
+          });
+        }
+      }
+    });
+    return expanded;
+  }, [events, currentDate]);
+
+  // Drag-and-drop reschedule handler
+  const handleEventDrop = async (eventId, newTimes) => {
+    await handleUpdateEvent(eventId, newTimes);
+  };
+
   const handleDayClick = (date) => {
     setSelectedDate(date);
     setEditingEvent(null);
@@ -264,28 +315,31 @@ export default function DashboardPage() {
           {calendarView === "month" && (
             <CalendarMonthView
               currentDate={currentDate}
-              events={events}
+              events={displayEvents}
               tasks={tasks}
               onDayClick={handleDayClick}
               onEventClick={handleEventClick}
+              onEventDrop={handleEventDrop}
             />
           )}
           {calendarView === "week" && (
             <CalendarWeekView
               currentDate={currentDate}
-              events={events}
+              events={displayEvents}
               tasks={tasks}
               onTimeSlotClick={handleTimeSlotClick}
               onEventClick={handleEventClick}
+              onEventDrop={handleEventDrop}
             />
           )}
           {calendarView === "day" && (
             <CalendarDayView
               currentDate={currentDate}
-              events={events}
+              events={displayEvents}
               tasks={tasks}
               onTimeSlotClick={handleTimeSlotClick}
               onEventClick={handleEventClick}
+              onEventDrop={handleEventDrop}
             />
           )}
         </div>

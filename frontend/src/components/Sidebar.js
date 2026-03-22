@@ -10,11 +10,13 @@ import {
   Clock,
   Settings,
   LogOut,
+  Share2,
 } from "lucide-react";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Clock, label: "Availability", path: "/availability" },
+  { icon: Share2, label: "Share", path: "/share" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 

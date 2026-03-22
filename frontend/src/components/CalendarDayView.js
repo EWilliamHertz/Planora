@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   format,
   isSameDay,
@@ -7,6 +8,7 @@ import {
 } from "date-fns";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Repeat } from "lucide-react";
 
 const EVENT_COLORS = {
   indigo: "bg-indigo-500/15 border-indigo-500/30 text-indigo-700 dark:text-indigo-300",
@@ -22,7 +24,9 @@ const GRID_END = 21;
 const HOUR_HEIGHT = 64;
 const HOURS = Array.from({ length: GRID_END - GRID_START }, (_, i) => i + GRID_START);
 
-export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventClick }) {
+export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventClick, onEventDrop }) {
+  const [dragOverHour, setDragOverHour] = useState(null);
+
   const dayEvents = events.filter(
     (e) => e.start_time && isSameDay(parseISO(e.start_time), currentDate)
   );
@@ -35,6 +39,48 @@ export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventC
     const top = (Math.max(startH, GRID_START) - GRID_START) * HOUR_HEIGHT;
     const height = (Math.min(endH, GRID_END) - Math.max(startH, GRID_START)) * HOUR_HEIGHT;
     return { top, height: Math.max(height, 24) };
+  };
+
+  const handleDragStart = (e, event) => {
+    if (event.is_recurring_instance) { e.preventDefault(); return; }
+    e.dataTransfer.setData("application/json", JSON.stringify({
+      event_id: event.event_id,
+      start_time: event.start_time,
+      end_time: event.end_time,
+    }));
+    e.dataTransfer.effectAllowed = "move";
+    e.currentTarget.style.opacity = "0.4";
+  };
+
+  const handleDragEnd = (e) => {
+    e.currentTarget.style.opacity = "1";
+    setDragOverHour(null);
+  };
+
+  const handleSlotDragOver = (e, hour) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverHour(hour);
+  };
+
+  const handleSlotDrop = (e, hour) => {
+    e.preventDefault();
+    setDragOverHour(null);
+    try {
+      const data = JSON.parse(e.dataTransfer.getData("application/json"));
+      const oldStart = parseISO(data.start_time);
+      const oldEnd = parseISO(data.end_time);
+      const duration = oldEnd.getTime() - oldStart.getTime();
+      const newStart = new Date(currentDate);
+      newStart.setHours(hour, 0, 0, 0);
+      const newEnd = new Date(newStart.getTime() + duration);
+      onEventDrop(data.event_id, {
+        start_time: newStart.toISOString(),
+        end_time: newEnd.toISOString(),
+      });
+    } catch (err) {
+      console.error("Drop failed:", err);
+    }
   };
 
   return (
@@ -57,29 +103,40 @@ export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventC
             {HOURS.map((hour) => (
               <div
                 key={hour}
-                className="h-16 border-b border-border/50 cursor-pointer hover:bg-accent/30 transition-colors"
+                className={cn(
+                  "h-16 border-b border-border/50 cursor-pointer hover:bg-accent/30 transition-all",
+                  dragOverHour === hour && "bg-primary/10"
+                )}
                 onClick={() => onTimeSlotClick(currentDate, hour)}
+                onDragOver={(e) => handleSlotDragOver(e, hour)}
+                onDragLeave={() => setDragOverHour(null)}
+                onDrop={(e) => handleSlotDrop(e, hour)}
               />
             ))}
 
             {/* Events */}
             {dayEvents.map((event) => {
               const { top, height } = getEventPosition(event);
+              const isRecurring = event.is_recurring_instance || (event.recurrence?.type && event.recurrence.type !== "none");
               return (
                 <div
                   key={event.event_id}
                   data-testid={`day-event-${event.event_id}`}
+                  draggable={!event.is_recurring_instance}
+                  onDragStart={(e) => handleDragStart(e, event)}
+                  onDragEnd={handleDragEnd}
                   className={cn(
                     "absolute left-1 right-4 rounded-lg px-3 py-2 border cursor-pointer transition-opacity hover:opacity-80",
-                    EVENT_COLORS[event.color] || EVENT_COLORS.indigo
+                    EVENT_COLORS[event.color] || EVENT_COLORS.indigo,
+                    !event.is_recurring_instance && "cursor-grab active:cursor-grabbing"
                   )}
                   style={{ top: `${top}px`, height: `${height}px` }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEventClick(event);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
                 >
-                  <div className="text-sm font-semibold truncate">{event.title}</div>
+                  <div className="text-sm font-semibold truncate flex items-center gap-1">
+                    {isRecurring && <Repeat className="h-3 w-3 shrink-0 opacity-70" />}
+                    <span className="truncate">{event.title}</span>
+                  </div>
                   {height > 40 && (
                     <div className="text-xs opacity-80 mt-0.5">
                       {format(parseISO(event.start_time), "h:mm a")} -{" "}
