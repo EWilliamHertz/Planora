@@ -7,17 +7,41 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const exchangeOAuthSession = useCallback(async () => {
+    const hash = window.location.hash || "";
+    const match = hash.match(/session_id=([^&]+)/);
+    if (!match) return false;
+
+    const sessionId = match[1];
+    try {
+      const res = await fetch(`${API_URL}/api/auth/session?session_id=${sessionId}`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        // Clean the hash from URL
+        window.history.replaceState(null, "", window.location.pathname);
+        return true;
+      }
+    } catch (e) {
+      console.error("OAuth session exchange failed:", e);
+    }
+    return false;
+  }, []);
+
   const checkAuth = useCallback(async () => {
-    // CRITICAL: If returning from OAuth callback, skip the /me check.
-    // AuthCallback will exchange the session_id and establish the session first.
-    if (window.location.hash?.includes('session_id=')) {
+    // First try to exchange OAuth session_id if present in hash
+    if (window.location.hash?.includes("session_id=")) {
+      const exchanged = await exchangeOAuthSession();
       setLoading(false);
-      return;
+      if (exchanged) return;
     }
 
+    // Otherwise check existing session cookie
     try {
       const res = await fetch(`${API_URL}/api/auth/me`, {
-        credentials: 'include'
+        credentials: "include",
       });
       if (res.ok) {
         const data = await res.json();
@@ -27,7 +51,7 @@ export function AuthProvider({ children }) {
       // Not authenticated
     }
     setLoading(false);
-  }, []);
+  }, [exchangeOAuthSession]);
 
   useEffect(() => {
     checkAuth();
@@ -35,14 +59,14 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await fetch(`${API_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, password })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Login failed');
+      throw new Error(err.detail || "Login failed");
     }
     const data = await res.json();
     setUser(data);
@@ -51,14 +75,14 @@ export function AuthProvider({ children }) {
 
   const register = async (name, email, password) => {
     const res = await fetch(`${API_URL}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ name, email, password })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ name, email, password }),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Registration failed');
+      throw new Error(err.detail || "Registration failed");
     }
     const data = await res.json();
     setUser(data);
@@ -68,8 +92,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try {
       await fetch(`${API_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
+        method: "POST",
+        credentials: "include",
       });
     } catch (e) {
       // Ignore errors
@@ -78,8 +102,7 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithGoogle = () => {
-    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + '/dashboard';
+    const redirectUrl = window.location.origin + "/dashboard";
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };
 
@@ -92,6 +115,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 }
