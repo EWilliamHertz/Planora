@@ -22,6 +22,7 @@ const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Clock, label: "Availability", path: "/availability" },
   { icon: BarChart3, label: "Analytics", path: "/analytics" },
+  { icon: Users, label: "Teams", path: "/teams" },
   { icon: Share2, label: "Share", path: "/share" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];

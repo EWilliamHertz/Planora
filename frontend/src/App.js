@@ -12,6 +12,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import SharePage from "@/pages/SharePage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import SharedCalendarPage from "@/pages/SharedCalendarPage";
+import TeamsPage from "@/pages/TeamsPage";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Loader2 } from "lucide-react";
 
@@ -56,6 +57,7 @@ function AppRouter() {
           <Route path="/share" element={<SharePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/shared/:userId" element={<SharedCalendarPage />} />
+          <Route path="/teams" element={<TeamsPage />} />
         </Route>
       </Route>
     </Routes>

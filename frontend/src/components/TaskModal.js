@@ -27,6 +27,7 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [category, setCategory] = useState(null);
+  const [status, setStatus] = useState("todo");
 
   useEffect(() => {
     if (task) {
@@ -34,10 +35,12 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
       setDescription(task.description || "");
       setDueDate(task.due_date ? task.due_date.slice(0, 16) : "");
       setCategory(task.category || null);
+      setStatus(task.status || (task.completed ? "done" : "todo"));
     } else {
       setTitle("");
       setDescription("");
       setCategory(null);
+      setStatus("todo");
       const d = new Date();
       d.setHours(17, 0, 0, 0);
       d.setDate(d.getDate() + 1);
@@ -51,8 +54,9 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
       title: title.trim(),
       description,
       due_date: dueDate ? new Date(dueDate).toISOString() : null,
-      completed: task?.completed || false,
+      completed: status === "done",
       category,
+      status,
     };
     if (task) {
       onUpdate(task.task_id, data);
@@ -113,6 +117,33 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
                 >
                   <span className={cn("h-2 w-2 rounded-full", cat.color)} />
                   {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <div className="flex gap-2" data-testid="task-status-selector">
+              {[
+                { value: "todo", label: "To Do" },
+                { value: "in_progress", label: "In Progress" },
+                { value: "done", label: "Done" },
+              ].map((s) => (
+                <button
+                  key={s.value}
+                  data-testid={`task-status-${s.value}`}
+                  type="button"
+                  className={cn(
+                    "flex-1 py-1.5 rounded-lg border-2 text-xs font-medium transition-colors",
+                    status === s.value
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:border-primary/30"
+                  )}
+                  onClick={() => setStatus(s.value)}
+                >
+                  {s.label}
                 </button>
               ))}
             </div>

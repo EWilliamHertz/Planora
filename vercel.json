@@ -2,15 +2,21 @@
   "buildCommand": "cd frontend && yarn install && yarn build",
   "outputDirectory": "frontend/build",
   "framework": null,
+  "functions": {
+    "api/**/*.py": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
       "source": "/service-worker.js",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     }
   ]

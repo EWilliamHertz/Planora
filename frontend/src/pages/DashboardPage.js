@@ -9,6 +9,7 @@ import { EventModal } from "@/components/EventModal";
 import { TaskModal } from "@/components/TaskModal";
 import { TaskSidebar } from "@/components/TaskSidebar";
 import { OnboardingWizard } from "@/components/OnboardingWizard";
+import { KanbanView } from "@/components/KanbanView";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useReminders } from "@/hooks/useReminders";
 import {
@@ -18,6 +19,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Loader2,
+  Kanban,
 } from "lucide-react";
 import {
   format,
@@ -329,6 +331,9 @@ export default function DashboardPage() {
                 <TabsTrigger data-testid="view-month-btn" value="month" className="text-xs px-3 h-6">Month</TabsTrigger>
                 <TabsTrigger data-testid="view-week-btn" value="week" className="text-xs px-3 h-6">Week</TabsTrigger>
                 <TabsTrigger data-testid="view-day-btn" value="day" className="text-xs px-3 h-6">Day</TabsTrigger>
+                <TabsTrigger data-testid="view-kanban-btn" value="kanban" className="text-xs px-3 h-6">
+                  <Kanban className="h-3 w-3 mr-1" />Board
+                </TabsTrigger>
               </TabsList>
             </Tabs>
 
@@ -346,37 +351,48 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Calendar */}
+        {/* Calendar / Kanban */}
         <div className="flex-1 overflow-auto p-4 sm:p-6">
-          {calendarView === "month" && (
-            <CalendarMonthView
-              currentDate={currentDate}
-              events={displayEvents}
+          {calendarView === "kanban" ? (
+            <KanbanView
               tasks={tasks}
-              onDayClick={handleDayClick}
-              onEventClick={handleEventClick}
-              onEventDrop={handleEventDrop}
+              onTaskClick={handleTaskClick}
+              onUpdateTask={handleUpdateTask}
+              onCreateTask={() => { setEditingTask(null); setShowTaskModal(true); }}
             />
-          )}
-          {calendarView === "week" && (
-            <CalendarWeekView
-              currentDate={currentDate}
-              events={displayEvents}
-              tasks={tasks}
-              onTimeSlotClick={handleTimeSlotClick}
-              onEventClick={handleEventClick}
-              onEventDrop={handleEventDrop}
-            />
-          )}
-          {calendarView === "day" && (
-            <CalendarDayView
-              currentDate={currentDate}
-              events={displayEvents}
-              tasks={tasks}
-              onTimeSlotClick={handleTimeSlotClick}
-              onEventClick={handleEventClick}
-              onEventDrop={handleEventDrop}
-            />
+          ) : (
+            <>
+              {calendarView === "month" && (
+                <CalendarMonthView
+                  currentDate={currentDate}
+                  events={displayEvents}
+                  tasks={tasks}
+                  onDayClick={handleDayClick}
+                  onEventClick={handleEventClick}
+                  onEventDrop={handleEventDrop}
+                />
+              )}
+              {calendarView === "week" && (
+                <CalendarWeekView
+                  currentDate={currentDate}
+                  events={displayEvents}
+                  tasks={tasks}
+                  onTimeSlotClick={handleTimeSlotClick}
+                  onEventClick={handleEventClick}
+                  onEventDrop={handleEventDrop}
+                />
+              )}
+              {calendarView === "day" && (
+                <CalendarDayView
+                  currentDate={currentDate}
+                  events={displayEvents}
+                  tasks={tasks}
+                  onTimeSlotClick={handleTimeSlotClick}
+                  onEventClick={handleEventClick}
+                  onEventDrop={handleEventDrop}
+                />
+              )}
+            </>
           )}
         </div>
       </div>

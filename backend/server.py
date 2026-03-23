@@ -20,7 +20,9 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+env_path = ROOT_DIR / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -124,7 +126,8 @@ class TaskCreate(BaseModel):
     description: Optional[str] = ""
     due_date: Optional[str] = None
     completed: Optional[bool] = False
-    category: Optional[str] = None  # "work", "personal", "urgent", "health", "finance"
+    category: Optional[str] = None
+    status: Optional[str] = "todo"  # "todo", "in_progress", "done"
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
@@ -132,6 +135,7 @@ class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     completed: Optional[bool] = None
     category: Optional[str] = None
+    status: Optional[str] = None
 
 class AvailabilityUpdate(BaseModel):
     schedule: Dict
@@ -147,7 +151,20 @@ class BookingCreate(BaseModel):
 
 class CalendarShareCreate(BaseModel):
     email: str
-    permission: Optional[str] = "view"  # "view" or "edit"
+    permission: Optional[str] = "view"
+
+class RecurringBookingCreate(BaseModel):
+    title: str
+    duration: Optional[int] = 30
+    recurrence: Optional[str] = "weekly"  # "weekly", "biweekly"
+    description: Optional[str] = ""
+
+class TeamCreate(BaseModel):
+    name: str
+
+class TeamInvite(BaseModel):
+    email: str
+    role: Optional[str] = "member"  # "admin", "member"
 
 # --- Auth Helper ---
 
@@ -405,6 +422,7 @@ async def create_task(data: TaskCreate, request: Request):
         "due_date": data.due_date,
         "completed": data.completed,
         "category": data.category,
+        "status": data.status or "todo",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.tasks.insert_one(task_doc)
@@ -1031,6 +1049,121 @@ async def get_upcoming_reminders(request: Request):
             continue
 
     return due_reminders
+
+# --- Recurring Booking Links ---
+
+@api_router.post("/booking-links")
+async def create_booking_link(data: RecurringBookingCreate, request: Request):
+    user = await get_current_user(request)
+    link_id = f"blink_{uuid.uuid4().hex[:12]}"
+    link_doc = {
+        "link_id": link_id,
+        "user_id": user["user_id"],
+        "title": data.title,
+        "duration": data.duration,
+        "recurrence": data.recurrence,
+        "description": data.description,
+        "active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.booking_links.insert_one(link_doc)
+    return {k: v for k, v in link_doc.items() if k != "_id"}
+
+@api_router.get("/booking-links")
+async def list_booking_links(request: Request):
+    user = await get_current_user(request)
+    links = await db.booking_links.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(100)
+    return links
+
+@api_router.delete("/booking-links/{link_id}")
+async def delete_booking_link(link_id: str, request: Request):
+    user = await get_current_user(request)
+    await db.booking_links.delete_one({"link_id": link_id, "user_id": user["user_id"]})
+    return {"message": "Deleted"}
+
+@api_router.get("/booking-links/{link_id}/public")
+async def get_public_booking_link(link_id: str):
+    link = await db.booking_links.find_one({"link_id": link_id, "active": True}, {"_id": 0})
+    if not link:
+        raise HTTPException(status_code=404, detail="Booking link not found")
+    host = await db.users.find_one({"user_id": link["user_id"]}, {"_id": 0, "password_hash": 0})
+    return {**link, "host_name": host["name"] if host else "Unknown"}
+
+# --- Team Workspaces ---
+
+@api_router.post("/teams")
+async def create_team(data: TeamCreate, request: Request):
+    user = await get_current_user(request)
+    team_id = f"team_{uuid.uuid4().hex[:12]}"
+    team_doc = {
+        "team_id": team_id,
+        "name": data.name,
+        "owner_id": user["user_id"],
+        "members": [{"user_id": user["user_id"], "email": user["email"], "name": user["name"], "role": "admin"}],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.teams.insert_one(team_doc)
+    return {k: v for k, v in team_doc.items() if k != "_id"}
+
+@api_router.get("/teams")
+async def list_teams(request: Request):
+    user = await get_current_user(request)
+    teams = await db.teams.find(
+        {"members.user_id": user["user_id"]}, {"_id": 0}
+    ).to_list(50)
+    return teams
+
+@api_router.post("/teams/{team_id}/invite")
+async def invite_to_team(team_id: str, data: TeamInvite, request: Request):
+    user = await get_current_user(request)
+    team = await db.teams.find_one({"team_id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    is_admin = any(m["user_id"] == user["user_id"] and m["role"] == "admin" for m in team["members"])
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can invite")
+
+    if any(m["email"] == data.email for m in team["members"]):
+        raise HTTPException(status_code=400, detail="Already a member")
+
+    target = await db.users.find_one({"email": data.email}, {"_id": 0, "password_hash": 0})
+    member = {
+        "user_id": target["user_id"] if target else None,
+        "email": data.email,
+        "name": target["name"] if target else data.email,
+        "role": data.role
+    }
+    await db.teams.update_one(
+        {"team_id": team_id},
+        {"$push": {"members": member}}
+    )
+    return {"message": "Invited", "member": member}
+
+@api_router.delete("/teams/{team_id}/members/{member_email}")
+async def remove_from_team(team_id: str, member_email: str, request: Request):
+    user = await get_current_user(request)
+    team = await db.teams.find_one({"team_id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    is_admin = any(m["user_id"] == user["user_id"] and m["role"] == "admin" for m in team["members"])
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can remove members")
+    await db.teams.update_one(
+        {"team_id": team_id},
+        {"$pull": {"members": {"email": member_email}}}
+    )
+    return {"message": "Removed"}
+
+@api_router.get("/teams/{team_id}")
+async def get_team(team_id: str, request: Request):
+    user = await get_current_user(request)
+    team = await db.teams.find_one(
+        {"team_id": team_id, "members.user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found or no access")
+    return team
 
 # --- WebSocket ---
 
