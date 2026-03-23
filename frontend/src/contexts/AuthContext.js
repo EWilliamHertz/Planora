@@ -27,7 +27,28 @@ export function AuthProvider({ children }) {
   };
 
   const checkAuth = useCallback(async () => {
+    // Handle Google OAuth callback — the redirect lands with #session_id=XXXX in the hash
     if (window.location.hash?.includes("session_id=")) {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const sessionId = params.get("session_id");
+      if (sessionId) {
+        try {
+          const res = await fetch(`${API_URL}/api/auth/session?session_id=${sessionId}`, {
+            credentials: "include",
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.session_token) {
+              storeToken(data.session_token);
+              setUser(data);
+            }
+          }
+        } catch {
+          // ignore network errors
+        }
+        // Clean the hash from the URL so it doesn't re-trigger
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
       setLoading(false);
       return;
     }
