@@ -10,6 +10,7 @@ import AvailabilityPage from "@/pages/AvailabilityPage";
 import BookingPage from "@/pages/BookingPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SharePage from "@/pages/SharePage";
+import AnalyticsPage from "@/pages/AnalyticsPage";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Loader2 } from "lucide-react";
 
@@ -50,6 +51,7 @@ function AppRouter() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/availability" element={<AvailabilityPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/share" element={<SharePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
