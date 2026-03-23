@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,23 @@ const EVENT_DOT_COLORS = {
   violet: "bg-violet-500",
 };
 
+const CATEGORY_STYLES = {
+  work: { color: "bg-indigo-500", text: "text-indigo-600 dark:text-indigo-400" },
+  personal: { color: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  urgent: { color: "bg-rose-500", text: "text-rose-600 dark:text-rose-400" },
+  health: { color: "bg-sky-500", text: "text-sky-600 dark:text-sky-400" },
+  finance: { color: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+};
+
+const FILTER_OPTIONS = [
+  { value: null, label: "All" },
+  { value: "work", label: "Work" },
+  { value: "personal", label: "Personal" },
+  { value: "urgent", label: "Urgent" },
+  { value: "health", label: "Health" },
+  { value: "finance", label: "Finance" },
+];
+
 function formatDueLabel(dateStr) {
   if (!dateStr) return null;
   const d = parseISO(dateStr);
@@ -25,7 +43,11 @@ function formatDueLabel(dateStr) {
 }
 
 export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDeleteTask, onCreateTask }) {
-  const sortedTasks = [...tasks].sort((a, b) => {
+  const [categoryFilter, setCategoryFilter] = useState(null);
+
+  const filteredTasks = tasks.filter((t) => !categoryFilter || t.category === categoryFilter);
+
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
     if (!a.due_date) return 1;
     if (!b.due_date) return -1;
@@ -41,7 +63,7 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
     <div className="h-full flex flex-col" data-testid="task-sidebar">
       {/* Header */}
       <div className="p-4 pb-3 border-b border-border">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-bold tracking-tight uppercase">Tasks</h2>
           <Button
             data-testid="sidebar-create-task-btn"
@@ -53,18 +75,37 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
             <Plus className="h-4 w-4" />
           </Button>
         </div>
+        {/* Category Filter */}
+        <div className="flex gap-1 flex-wrap" data-testid="task-category-filter">
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.value || "all"}
+              data-testid={`filter-${opt.value || "all"}`}
+              className={cn(
+                "px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors",
+                categoryFilter === opt.value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:bg-accent/50"
+              )}
+              onClick={() => setCategoryFilter(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-1.5">
           {sortedTasks.length === 0 && (
             <div className="text-sm text-muted-foreground text-center py-8">
-              No tasks yet. Create one to get started.
+              {categoryFilter ? `No ${categoryFilter} tasks` : "No tasks yet. Create one to get started."}
             </div>
           )}
           {sortedTasks.map((task, i) => {
             const dueLabel = formatDueLabel(task.due_date);
             const isOverdue = dueLabel === "Overdue";
+            const catStyle = task.category ? CATEGORY_STYLES[task.category] : null;
             return (
               <div
                 key={task.task_id}
@@ -91,19 +132,27 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
                   )}>
                     {task.title}
                   </div>
-                  {dueLabel && (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Clock className="h-3 w-3" />
-                      <span
-                        className={cn(
-                          "text-xs",
-                          isOverdue ? "text-destructive font-medium" : "text-muted-foreground"
-                        )}
-                      >
-                        {dueLabel}
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {catStyle && (
+                      <span className={cn("inline-flex items-center gap-1 text-[10px] font-medium capitalize", catStyle.text)}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full", catStyle.color)} />
+                        {task.category}
                       </span>
-                    </div>
-                  )}
+                    )}
+                    {dueLabel && (
+                      <span className="flex items-center gap-0.5">
+                        <Clock className="h-3 w-3" />
+                        <span
+                          className={cn(
+                            "text-xs",
+                            isOverdue ? "text-destructive font-medium" : "text-muted-foreground"
+                          )}
+                        >
+                          {dueLabel}
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <Button
                   variant="ghost"

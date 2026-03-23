@@ -24,6 +24,51 @@ const GRID_END = 21;
 const HOUR_HEIGHT = 64;
 const HOURS = Array.from({ length: GRID_END - GRID_START }, (_, i) => i + GRID_START);
 
+// Calculate overlap columns for events
+function layoutEvents(dayEvents) {
+  if (dayEvents.length === 0) return [];
+
+  const positioned = dayEvents.map((event) => {
+    const start = parseISO(event.start_time);
+    const end = parseISO(event.end_time);
+    const startH = getHours(start) + getMinutes(start) / 60;
+    const endH = getHours(end) + getMinutes(end) / 60;
+    return { event, startH, endH, col: 0, totalCols: 1 };
+  });
+
+  positioned.sort((a, b) => a.startH - b.startH || a.endH - b.endH);
+
+  const columns = [];
+  for (const item of positioned) {
+    let placed = false;
+    for (let c = 0; c < columns.length; c++) {
+      const lastInCol = columns[c][columns[c].length - 1];
+      if (item.startH >= lastInCol.endH) {
+        item.col = c;
+        columns[c].push(item);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      item.col = columns.length;
+      columns.push([item]);
+    }
+  }
+
+  for (const item of positioned) {
+    const overlapping = positioned.filter(
+      (other) => other.startH < item.endH && other.endH > item.startH
+    );
+    const maxCol = Math.max(...overlapping.map((o) => o.col)) + 1;
+    for (const o of overlapping) {
+      o.totalCols = Math.max(o.totalCols, maxCol);
+    }
+  }
+
+  return positioned;
+}
+
 export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventClick, onEventDrop }) {
   const [dragOverHour, setDragOverHour] = useState(null);
 
@@ -31,15 +76,7 @@ export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventC
     (e) => e.start_time && isSameDay(parseISO(e.start_time), currentDate)
   );
 
-  const getEventPosition = (event) => {
-    const start = parseISO(event.start_time);
-    const end = parseISO(event.end_time);
-    const startH = getHours(start) + getMinutes(start) / 60;
-    const endH = getHours(end) + getMinutes(end) / 60;
-    const top = (Math.max(startH, GRID_START) - GRID_START) * HOUR_HEIGHT;
-    const height = (Math.min(endH, GRID_END) - Math.max(startH, GRID_START)) * HOUR_HEIGHT;
-    return { top, height: Math.max(height, 24) };
-  };
+  const positioned = layoutEvents(dayEvents);
 
   const handleDragStart = (e, event) => {
     if (event.is_recurring_instance) { e.preventDefault(); return; }
@@ -114,10 +151,14 @@ export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventC
               />
             ))}
 
-            {/* Events */}
-            {dayEvents.map((event) => {
-              const { top, height } = getEventPosition(event);
+            {/* Events with overlap handling */}
+            {positioned.map(({ event, startH, endH, col, totalCols }) => {
+              const top = (Math.max(startH, GRID_START) - GRID_START) * HOUR_HEIGHT;
+              const height = Math.max((Math.min(endH, GRID_END) - Math.max(startH, GRID_START)) * HOUR_HEIGHT, 24);
               const isRecurring = event.is_recurring_instance || (event.recurrence?.type && event.recurrence.type !== "none");
+              const width = `calc(${100 / totalCols}% - 8px)`;
+              const left = `calc(${(col / totalCols) * 100}% + 4px)`;
+
               return (
                 <div
                   key={event.event_id}
@@ -126,11 +167,11 @@ export function CalendarDayView({ currentDate, events, onTimeSlotClick, onEventC
                   onDragStart={(e) => handleDragStart(e, event)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "absolute left-1 right-4 rounded-lg px-3 py-2 border cursor-pointer transition-opacity hover:opacity-80",
+                    "absolute rounded-lg px-3 py-2 border cursor-pointer transition-opacity hover:opacity-80",
                     EVENT_COLORS[event.color] || EVENT_COLORS.indigo,
                     !event.is_recurring_instance && "cursor-grab active:cursor-grabbing"
                   )}
-                  style={{ top: `${top}px`, height: `${height}px` }}
+                  style={{ top: `${top}px`, height: `${height}px`, width, left }}
                   onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
                 >
                   <div className="text-sm font-semibold truncate flex items-center gap-1">

@@ -12,20 +12,32 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Trash2 } from "lucide-react";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+
+const CATEGORIES = [
+  { value: "work", label: "Work", color: "bg-indigo-500" },
+  { value: "personal", label: "Personal", color: "bg-emerald-500" },
+  { value: "urgent", label: "Urgent", color: "bg-rose-500" },
+  { value: "health", label: "Health", color: "bg-sky-500" },
+  { value: "finance", label: "Finance", color: "bg-amber-500" },
+];
 
 export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [category, setCategory] = useState(null);
 
   useEffect(() => {
     if (task) {
       setTitle(task.title);
       setDescription(task.description || "");
       setDueDate(task.due_date ? task.due_date.slice(0, 16) : "");
+      setCategory(task.category || null);
     } else {
       setTitle("");
       setDescription("");
+      setCategory(null);
       const d = new Date();
       d.setHours(17, 0, 0, 0);
       d.setDate(d.getDate() + 1);
@@ -40,6 +52,7 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
       description,
       due_date: dueDate ? new Date(dueDate).toISOString() : null,
       completed: task?.completed || false,
+      category,
     };
     if (task) {
       onUpdate(task.task_id, data);
@@ -80,6 +93,29 @@ export function TaskModal({ open, onClose, task, onCreate, onUpdate, onDelete })
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional description"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Category</Label>
+            <div className="flex flex-wrap gap-2" data-testid="task-category-selector">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat.value}
+                  data-testid={`task-category-${cat.value}`}
+                  type="button"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                    category === cat.value
+                      ? "border-foreground/30 bg-accent text-foreground"
+                      : "border-border text-muted-foreground hover:border-foreground/20 hover:bg-accent/50"
+                  )}
+                  onClick={() => setCategory(category === cat.value ? null : cat.value)}
+                >
+                  <span className={cn("h-2 w-2 rounded-full", cat.color)} />
+                  {cat.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-2">

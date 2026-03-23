@@ -82,12 +82,14 @@ class TaskCreate(BaseModel):
     description: Optional[str] = ""
     due_date: Optional[str] = None
     completed: Optional[bool] = False
+    category: Optional[str] = None  # "work", "personal", "urgent", "health", "finance"
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[str] = None
     completed: Optional[bool] = None
+    category: Optional[str] = None
 
 class AvailabilityUpdate(BaseModel):
     schedule: Dict
@@ -355,6 +357,7 @@ async def create_task(data: TaskCreate, request: Request):
         "description": data.description,
         "due_date": data.due_date,
         "completed": data.completed,
+        "category": data.category,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.tasks.insert_one(task_doc)
@@ -644,6 +647,7 @@ async def seed_data(request: Request):
             "description": "Compile sales figures and growth metrics for quarterly review",
             "due_date": (today + timedelta(days=1, hours=17)).isoformat(),
             "completed": False,
+            "category": "work",
             "created_at": now.isoformat()
         },
         {
@@ -653,6 +657,7 @@ async def seed_data(request: Request):
             "description": "Code review for the new authentication module",
             "due_date": (today + timedelta(hours=12)).isoformat(),
             "completed": True,
+            "category": "work",
             "created_at": now.isoformat()
         },
         {
@@ -662,6 +667,7 @@ async def seed_data(request: Request):
             "description": "Sync Figma designs with latest requirements from product",
             "due_date": (today + timedelta(days=3, hours=17)).isoformat(),
             "completed": False,
+            "category": "work",
             "created_at": now.isoformat()
         },
         {
@@ -671,6 +677,7 @@ async def seed_data(request: Request):
             "description": "Draft and send the Q2 engagement proposal to Acme Corp",
             "due_date": (today - timedelta(days=1)).isoformat(),
             "completed": False,
+            "category": "urgent",
             "created_at": now.isoformat()
         },
         {
@@ -680,6 +687,7 @@ async def seed_data(request: Request):
             "description": "Organize team outing for next month - research venues",
             "due_date": (today + timedelta(days=5, hours=17)).isoformat(),
             "completed": True,
+            "category": "personal",
             "created_at": now.isoformat()
         }
     ]
@@ -935,6 +943,74 @@ async def get_analytics(request: Request):
         "completed_tasks": completed_tasks,
         "task_completion_rate": round(completed_tasks / total_tasks * 100) if total_tasks else 0,
     }
+
+# --- iCal Export ---
+
+@api_router.get("/export/ical")
+async def export_ical(request: Request):
+    user = await get_current_user(request)
+    events = await db.events.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Planora//Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{user['name']}'s Planora",
+    ]
+
+    for evt in events:
+        uid = evt.get("event_id", uuid.uuid4().hex)
+        start = evt.get("start_time", "")
+        end = evt.get("end_time", "")
+
+        def to_ical_dt(iso_str):
+            try:
+                dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+                return dt.strftime("%Y%m%dT%H%M%SZ")
+            except Exception:
+                return ""
+
+        dtstart = to_ical_dt(start)
+        dtend = to_ical_dt(end)
+        if not dtstart or not dtend:
+            continue
+
+        summary = (evt.get("title") or "").replace(",", "\\,")
+        desc = (evt.get("description") or "").replace("\n", "\\n").replace(",", "\\,")
+
+        lines.append("BEGIN:VEVENT")
+        lines.append(f"UID:{uid}@planora")
+        lines.append(f"DTSTART:{dtstart}")
+        lines.append(f"DTEND:{dtend}")
+        lines.append(f"SUMMARY:{summary}")
+        if desc:
+            lines.append(f"DESCRIPTION:{desc}")
+        for att in evt.get("attendees", []):
+            if att.get("email"):
+                lines.append(f"ATTENDEE;CN={att.get('name', '')};RSVP=TRUE:mailto:{att['email']}")
+
+        rec = evt.get("recurrence")
+        if rec and rec.get("type") and rec["type"] != "none":
+            freq = rec["type"].upper()
+            rrule = f"RRULE:FREQ={freq}"
+            if rec.get("end_date"):
+                until = to_ical_dt(rec["end_date"])
+                if until:
+                    rrule += f";UNTIL={until}"
+            lines.append(rrule)
+
+        lines.append("END:VEVENT")
+
+    lines.append("END:VCALENDAR")
+    ical_content = "\r\n".join(lines)
+
+    return Response(
+        content=ical_content,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f"attachment; filename=planora-{user['user_id']}.ics"}
+    )
 
 # Include router
 app.include_router(api_router)

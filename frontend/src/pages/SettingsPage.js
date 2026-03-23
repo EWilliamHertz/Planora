@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw, Unplug, CalendarDays, CheckCircle2, XCircle } from "lucide-react";
+import { Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw, Unplug, CalendarDays, CheckCircle2, XCircle, Download } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -230,7 +230,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Booking Link Section */}
-      <div className="bg-card border border-border rounded-xl p-5">
+      <div className="bg-card border border-border rounded-xl p-5 mb-6">
         <div className="flex items-center gap-2 mb-4">
           <Link2 className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
@@ -256,6 +256,45 @@ export default function SettingsPage() {
             <Copy className="h-4 w-4" />
           </Button>
         </div>
+      </div>
+
+      {/* Export Calendar */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Download className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+            Export Calendar
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-3">
+          Download your events as an .ics file to import into Apple Calendar, Outlook, or other apps.
+        </p>
+        <Button
+          data-testid="export-ical-btn"
+          variant="outline"
+          onClick={async () => {
+            try {
+              const res = await fetch(`${API_URL}/api/export/ical`, { credentials: "include" });
+              if (res.ok) {
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "planora-calendar.ics";
+                a.click();
+                window.URL.revokeObjectURL(url);
+                toast.success("Calendar exported!");
+              } else {
+                toast.error("Export failed");
+              }
+            } catch (e) {
+              toast.error("Export failed");
+            }
+          }}
+        >
+          <Download className="h-4 w-4 mr-2" />
+          Download .ics File
+        </Button>
       </div>
     </div>
   );

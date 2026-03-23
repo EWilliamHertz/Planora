@@ -28,21 +28,59 @@ const GRID_END = 21;
 const HOUR_HEIGHT = 64;
 const HOURS = Array.from({ length: GRID_END - GRID_START }, (_, i) => i + GRID_START);
 
+// Calculate overlap columns for events
+function layoutEvents(dayEvents) {
+  if (dayEvents.length === 0) return [];
+
+  const positioned = dayEvents.map((event) => {
+    const start = parseISO(event.start_time);
+    const end = parseISO(event.end_time);
+    const startH = getHours(start) + getMinutes(start) / 60;
+    const endH = getHours(end) + getMinutes(end) / 60;
+    return { event, startH, endH, col: 0, totalCols: 1 };
+  });
+
+  positioned.sort((a, b) => a.startH - b.startH || a.endH - b.endH);
+
+  // Assign columns using a greedy algorithm
+  const columns = [];
+  for (const item of positioned) {
+    let placed = false;
+    for (let c = 0; c < columns.length; c++) {
+      const lastInCol = columns[c][columns[c].length - 1];
+      if (item.startH >= lastInCol.endH) {
+        item.col = c;
+        columns[c].push(item);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      item.col = columns.length;
+      columns.push([item]);
+    }
+  }
+
+  // Set total columns for overlapping groups
+  for (const item of positioned) {
+    // Find all items that overlap with this one
+    const overlapping = positioned.filter(
+      (other) => other.startH < item.endH && other.endH > item.startH
+    );
+    const maxCol = Math.max(...overlapping.map((o) => o.col)) + 1;
+    for (const o of overlapping) {
+      o.totalCols = Math.max(o.totalCols, maxCol);
+    }
+  }
+
+  return positioned;
+}
+
 export function CalendarWeekView({ currentDate, events, onTimeSlotClick, onEventClick, onEventDrop }) {
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const weekStart = startOfWeek(currentDate);
   const weekEnd = endOfWeek(currentDate);
   const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
-
-  const getEventPosition = (event) => {
-    const start = parseISO(event.start_time);
-    const end = parseISO(event.end_time);
-    const startH = getHours(start) + getMinutes(start) / 60;
-    const endH = getHours(end) + getMinutes(end) / 60;
-    const top = (Math.max(startH, GRID_START) - GRID_START) * HOUR_HEIGHT;
-    const height = (Math.min(endH, GRID_END) - Math.max(startH, GRID_START)) * HOUR_HEIGHT;
-    return { top, height: Math.max(height, 20) };
-  };
 
   const handleDragStart = (e, event) => {
     if (event.is_recurring_instance) { e.preventDefault(); return; }
@@ -127,6 +165,7 @@ export function CalendarWeekView({ currentDate, events, onTimeSlotClick, onEvent
             const dayEvents = events.filter(
               (e) => e.start_time && isSameDay(parseISO(e.start_time), day)
             );
+            const positioned = layoutEvents(dayEvents);
 
             return (
               <div key={day.toISOString()} className="relative border-l border-border">
@@ -148,10 +187,14 @@ export function CalendarWeekView({ currentDate, events, onTimeSlotClick, onEvent
                   );
                 })}
 
-                {/* Events */}
-                {dayEvents.map((event) => {
-                  const { top, height } = getEventPosition(event);
+                {/* Events with overlap handling */}
+                {positioned.map(({ event, startH, endH, col, totalCols }) => {
+                  const top = (Math.max(startH, GRID_START) - GRID_START) * HOUR_HEIGHT;
+                  const height = Math.max((Math.min(endH, GRID_END) - Math.max(startH, GRID_START)) * HOUR_HEIGHT, 20);
                   const isRecurring = event.is_recurring_instance || (event.recurrence?.type && event.recurrence.type !== "none");
+                  const width = `calc(${100 / totalCols}% - 2px)`;
+                  const left = `calc(${(col / totalCols) * 100}% + 1px)`;
+
                   return (
                     <div
                       key={event.event_id}
@@ -160,11 +203,11 @@ export function CalendarWeekView({ currentDate, events, onTimeSlotClick, onEvent
                       onDragStart={(e) => handleDragStart(e, event)}
                       onDragEnd={handleDragEnd}
                       className={cn(
-                        "absolute left-0.5 right-0.5 rounded-md px-2 py-1 border cursor-pointer transition-opacity hover:opacity-80 overflow-hidden",
+                        "absolute rounded-md px-1.5 py-1 border cursor-pointer transition-opacity hover:opacity-80 overflow-hidden",
                         EVENT_COLORS[event.color] || EVENT_COLORS.indigo,
                         !event.is_recurring_instance && "cursor-grab active:cursor-grabbing"
                       )}
-                      style={{ top: `${top}px`, height: `${height}px` }}
+                      style={{ top: `${top}px`, height: `${height}px`, width, left }}
                       onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
                     >
                       <div className="text-xs font-semibold truncate flex items-center gap-0.5">
