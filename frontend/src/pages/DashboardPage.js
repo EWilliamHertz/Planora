@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, authFetch } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarMonthView } from "@/components/CalendarMonthView";
@@ -79,13 +79,13 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     try {
       const [eventsRes, tasksRes] = await Promise.all([
-        fetch(`${API_URL}/api/events`, { credentials: "include" }),
-        fetch(`${API_URL}/api/tasks`, { credentials: "include" }),
+        authFetch(`${API_URL}/api/events`),
+        authFetch(`${API_URL}/api/tasks`),
       ]);
       if (eventsRes.ok) setEvents(await eventsRes.json());
       if (tasksRes.ok) setTasks(await tasksRes.json());
     } catch (e) {
-      console.error("Failed to fetch:", e);
+      console.error("Failed to authFetch:", e);
     }
     setLoading(false);
   }, []);
@@ -94,10 +94,9 @@ export default function DashboardPage() {
 
   const handleCreateEvent = async (data) => {
     try {
-      const res = await fetch(`${API_URL}/api/events`, {
+      const res = await authFetch(`${API_URL}/api/events`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(data),
       });
       if (res.ok) {
@@ -112,10 +111,9 @@ export default function DashboardPage() {
 
   const handleUpdateEvent = async (eventId, data) => {
     try {
-      const res = await fetch(`${API_URL}/api/events/${eventId}`, {
+      const res = await authFetch(`${API_URL}/api/events/${eventId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(data),
       });
       if (res.ok) {
@@ -130,9 +128,8 @@ export default function DashboardPage() {
 
   const handleDeleteEvent = async (eventId) => {
     try {
-      const res = await fetch(`${API_URL}/api/events/${eventId}`, {
+      const res = await authFetch(`${API_URL}/api/events/${eventId}`, {
         method: "DELETE",
-        credentials: "include",
       });
       if (res.ok) {
         setEvents((prev) => prev.filter((e) => e.event_id !== eventId));
@@ -145,10 +142,9 @@ export default function DashboardPage() {
 
   const handleCreateTask = async (data) => {
     try {
-      const res = await fetch(`${API_URL}/api/tasks`, {
+      const res = await authFetch(`${API_URL}/api/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(data),
       });
       if (res.ok) {
@@ -163,10 +159,9 @@ export default function DashboardPage() {
 
   const handleUpdateTask = async (taskId, data) => {
     try {
-      const res = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+      const res = await authFetch(`${API_URL}/api/tasks/${taskId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(data),
       });
       if (res.ok) {
@@ -180,9 +175,8 @@ export default function DashboardPage() {
 
   const handleDeleteTask = async (taskId) => {
     try {
-      const res = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+      const res = await authFetch(`${API_URL}/api/tasks/${taskId}`, {
         method: "DELETE",
-        credentials: "include",
       });
       if (res.ok) {
         setTasks((prev) => prev.filter((t) => t.task_id !== taskId));

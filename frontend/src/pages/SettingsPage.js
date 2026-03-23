@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, authFetch } from "@/contexts/AuthContext";
 import { useTheme } from "next-themes";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ export default function SettingsPage() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/api/subscribe/status/${sessionId}`, { credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/subscribe/status/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.status === "paid" || data.payment_status === "paid") {
@@ -90,11 +90,11 @@ export default function SettingsPage() {
     const fetchAll = async () => {
       try {
         const [gcalRes, sharesRes, plansRes, planRes, prefsRes] = await Promise.all([
-          fetch(`${API_URL}/api/gcal/status`, { credentials: "include" }),
-          fetch(`${API_URL}/api/calendar/shares`, { credentials: "include" }),
+          authFetch(`${API_URL}/api/gcal/status`),
+          authFetch(`${API_URL}/api/calendar/shares`),
           fetch(`${API_URL}/api/plans`),
-          fetch(`${API_URL}/api/user/plan`, { credentials: "include" }),
-          fetch(`${API_URL}/api/user/preferences`, { credentials: "include" }),
+          authFetch(`${API_URL}/api/user/plan`),
+          authFetch(`${API_URL}/api/user/preferences`),
         ]);
         if (gcalRes.ok) { const d = await gcalRes.json(); setGcalConnected(d.connected); }
         if (sharesRes.ok) setShares(await sharesRes.json());
@@ -118,7 +118,7 @@ export default function SettingsPage() {
 
   const connectGoogleCalendar = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/gcal/connect`, { credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/gcal/connect`);
       if (res.ok) {
         const data = await res.json();
         window.location.href = data.authorization_url;
@@ -133,7 +133,7 @@ export default function SettingsPage() {
   const syncGoogleCalendar = async () => {
     setSyncing(true);
     try {
-      const res = await fetch(`${API_URL}/api/gcal/sync`, { method: "POST", credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/gcal/sync`, { method: "POST" });
       if (res.ok) { const d = await res.json(); toast.success(d.message || "Sync completed!"); }
       else toast.error("Sync failed");
     } catch { toast.error("Sync failed"); }
@@ -142,7 +142,7 @@ export default function SettingsPage() {
 
   const disconnectGoogleCalendar = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/gcal/disconnect`, { method: "POST", credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/gcal/disconnect`, { method: "POST" });
       if (res.ok) { setGcalConnected(false); toast.success("Google Calendar disconnected"); }
     } catch { toast.error("Failed to disconnect"); }
   };
@@ -156,8 +156,8 @@ export default function SettingsPage() {
     if (!shareEmail.trim()) return;
     setSharing(true);
     try {
-      const res = await fetch(`${API_URL}/api/calendar/share`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+      const res = await authFetch(`${API_URL}/api/calendar/share`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: shareEmail.trim(), permission: sharePermission }),
       });
       if (res.ok) {
@@ -172,7 +172,7 @@ export default function SettingsPage() {
 
   const revokeShare = async (shareId) => {
     try {
-      const res = await fetch(`${API_URL}/api/calendar/shares/${shareId}`, { method: "DELETE", credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/calendar/shares/${shareId}`, { method: "DELETE" });
       if (res.ok) {
         setShares((prev) => ({ ...prev, shared_by_me: prev.shared_by_me.filter((s) => s.share_id !== shareId) }));
         toast.success("Share revoked");
@@ -183,8 +183,8 @@ export default function SettingsPage() {
   const handleSubscribe = async (planId) => {
     setSubscribing(planId);
     try {
-      const res = await fetch(`${API_URL}/api/subscribe`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+      const res = await authFetch(`${API_URL}/api/subscribe`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan_id: planId, origin_url: window.location.origin }),
       });
       if (res.ok) {
@@ -201,8 +201,8 @@ export default function SettingsPage() {
   const toggleDigest = async (enabled) => {
     setDigestLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/user/preferences/digest`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+      const res = await authFetch(`${API_URL}/api/user/preferences/digest`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
       if (res.ok) {
@@ -216,7 +216,7 @@ export default function SettingsPage() {
   const sendDigestNow = async () => {
     setSendingDigest(true);
     try {
-      const res = await fetch(`${API_URL}/api/digest/send`, { method: "POST", credentials: "include" });
+      const res = await authFetch(`${API_URL}/api/digest/send`, { method: "POST" });
       if (res.ok) {
         const d = await res.json();
         toast.success(`Digest sent to ${d.email}`);
@@ -519,7 +519,7 @@ export default function SettingsPage() {
           variant="outline"
           onClick={async () => {
             try {
-              const res = await fetch(`${API_URL}/api/export/ical`, { credentials: "include" });
+              const res = await authFetch(`${API_URL}/api/export/ical`);
               if (res.ok) {
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
