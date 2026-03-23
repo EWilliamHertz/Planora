@@ -1384,12 +1384,28 @@ app.add_middleware(
 async def startup():
     global db_pool
     if not DATABASE_URL:
-        logger.warning("DATABASE_URL is not set — DB features will be unavailable")
-        return
-    db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=10)
+        logger.error("DATABASE_URL is not set — cannot start server")
+        raise RuntimeError("DATABASE_URL environment variable is required")
+    
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=10)
+        logger.info("Database pool created")
+    except Exception as e:
+        logger.error(f"Failed to create database pool: {e}")
+        raise
+    
+    # Execute schema statements individually
     async with db_pool.acquire() as conn:
-        await conn.execute(SCHEMA_SQL)
-    logger.info("Database pool created and schema initialised")
+        statements = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
+        for i, stmt in enumerate(statements):
+            try:
+                await conn.execute(stmt)
+                logger.debug(f"Executed schema statement {i+1}/{len(statements)}")
+            except Exception as e:
+                logger.error(f"Schema initialization failed at statement {i+1}: {e}\nStatement: {stmt}")
+                raise
+    
+    logger.info("Database pool created and schema initialised successfully")
 
 @app.on_event("shutdown")
 async def shutdown():
