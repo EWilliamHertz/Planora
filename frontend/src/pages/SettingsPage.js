@@ -1,19 +1,96 @@
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "next-themes";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Sun, Moon, Monitor, Link2, Copy, User } from "lucide-react";
+import { Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw, Unplug, CalendarDays, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function SettingsPage() {
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
+  const [searchParams] = useSearchParams();
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [gcalLoading, setGcalLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   const bookingLink = `${window.location.origin}/book/${user?.user_id}`;
+
+  useEffect(() => {
+    const checkGcalStatus = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/gcal/status`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          setGcalConnected(data.connected);
+        }
+      } catch (e) {
+        console.error("Failed to check gcal status:", e);
+      }
+      setGcalLoading(false);
+    };
+    checkGcalStatus();
+
+    if (searchParams.get("gcal") === "connected") {
+      toast.success("Google Calendar connected!");
+      setGcalConnected(true);
+    }
+  }, [searchParams]);
+
+  const connectGoogleCalendar = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/gcal/connect`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = data.authorization_url;
+      } else {
+        toast.error("Google Calendar is not configured");
+      }
+    } catch (e) {
+      toast.error("Failed to connect");
+    }
+  };
+
+  const syncGoogleCalendar = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API_URL}/api/gcal/sync`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(data.message || "Sync completed!");
+      } else {
+        toast.error("Sync failed");
+      }
+    } catch (e) {
+      toast.error("Sync failed");
+    }
+    setSyncing(false);
+  };
+
+  const disconnectGoogleCalendar = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/gcal/disconnect`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setGcalConnected(false);
+        toast.success("Google Calendar disconnected");
+      }
+    } catch (e) {
+      toast.error("Failed to disconnect");
+    }
+  };
 
   const copyBookingLink = () => {
     navigator.clipboard.writeText(bookingLink);
@@ -34,7 +111,7 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Manage your profile, preferences, and booking link.
+          Manage your profile, integrations, and booking link.
         </p>
       </div>
 
@@ -88,6 +165,68 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Google Calendar Section */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="gcal-section">
+        <div className="flex items-center gap-2 mb-4">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+            Google Calendar
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Sync your Planora events with Google Calendar for two-way integration.
+        </p>
+
+        {gcalLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Checking connection...
+          </div>
+        ) : gcalConnected ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Connected</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                data-testid="gcal-sync-btn"
+                variant="outline"
+                size="sm"
+                onClick={syncGoogleCalendar}
+                disabled={syncing}
+              >
+                {syncing ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Sync Now
+              </Button>
+              <Button
+                data-testid="gcal-disconnect-btn"
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={disconnectGoogleCalendar}
+              >
+                <Unplug className="h-4 w-4 mr-2" />
+                Disconnect
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            data-testid="gcal-connect-btn"
+            variant="outline"
+            onClick={connectGoogleCalendar}
+          >
+            <CalendarDays className="h-4 w-4 mr-2" />
+            Connect Google Calendar
+          </Button>
+        )}
       </div>
 
       {/* Booking Link Section */}

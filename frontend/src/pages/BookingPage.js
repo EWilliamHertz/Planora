@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, Clock, Check, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
-import { format, addDays, subDays, isBefore, startOfDay } from "date-fns";
+import { CalendarDays, Clock, Check, Loader2 } from "lucide-react";
+import { format, addDays, isBefore, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -16,6 +16,7 @@ export default function BookingPage() {
   const [hostName, setHostName] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [slots, setSlots] = useState([]);
+  const [slotDuration, setSlotDuration] = useState(30);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -47,7 +48,9 @@ export default function BookingPage() {
         const dateStr = format(selectedDate, "yyyy-MM-dd");
         const res = await fetch(`${API_URL}/api/bookings/available/${userId}?date=${dateStr}`);
         if (res.ok) {
-          setSlots(await res.json());
+          const data = await res.json();
+          setSlots(data.slots || []);
+          setSlotDuration(data.slot_duration || 30);
         }
       } catch (e) {
         console.error(e);
@@ -71,6 +74,7 @@ export default function BookingPage() {
           guest_email: guestEmail.trim(),
           start_time: selectedSlot.start_time,
           end_time: selectedSlot.end_time,
+          duration: slotDuration,
         }),
       });
       if (res.ok) {
@@ -131,6 +135,10 @@ export default function BookingPage() {
           <p className="text-sm text-muted-foreground">
             Select a date and time that works for you
           </p>
+          <Badge variant="secondary" className="mt-2 font-mono text-xs" data-testid="booking-duration-badge">
+            <Clock className="h-3 w-3 mr-1" />
+            {slotDuration} min meetings
+          </Badge>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">

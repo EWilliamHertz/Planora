@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Clock, Save, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -19,9 +20,16 @@ const DAYS = [
   { key: "sunday", label: "Sunday" },
 ];
 
+const DURATION_OPTIONS = [
+  { value: 15, label: "15 min" },
+  { value: 30, label: "30 min" },
+  { value: 60, label: "60 min" },
+];
+
 export default function AvailabilityPage() {
   const { user } = useAuth();
   const [schedule, setSchedule] = useState({});
+  const [slotDuration, setSlotDuration] = useState(30);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -32,6 +40,7 @@ export default function AvailabilityPage() {
         if (res.ok) {
           const data = await res.json();
           setSchedule(data.schedule || {});
+          setSlotDuration(data.slot_duration || 30);
         }
       } catch (e) {
         console.error("Failed to fetch availability:", e);
@@ -55,7 +64,7 @@ export default function AvailabilityPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ schedule }),
+        body: JSON.stringify({ schedule, slot_duration: slotDuration }),
       });
       if (res.ok) {
         toast.success("Availability updated");
@@ -86,6 +95,34 @@ export default function AvailabilityPage() {
         </p>
       </div>
 
+      {/* Slot Duration Selector */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6">
+        <Label className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3 block">
+          Meeting Duration
+        </Label>
+        <p className="text-sm text-muted-foreground mb-3">
+          How long should each bookable slot be?
+        </p>
+        <div className="flex gap-2" data-testid="slot-duration-selector">
+          {DURATION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              data-testid={`duration-${opt.value}`}
+              className={cn(
+                "flex-1 py-2.5 px-4 rounded-lg border-2 text-sm font-medium transition-colors",
+                slotDuration === opt.value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border hover:border-primary/30 hover:bg-accent/50 text-muted-foreground"
+              )}
+              onClick={() => setSlotDuration(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Weekly Schedule */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-1">
         {DAYS.map((day) => {
           const dayData = schedule[day.key] || { enabled: false, start: "09:00", end: "17:00" };
