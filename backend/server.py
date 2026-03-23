@@ -33,9 +33,16 @@ logger = logging.getLogger(__name__)
 
 import certifi
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
-db = client[os.environ['DB_NAME']]
+# Use .get() so the app doesn't crash if the variable is missing
+mongo_url = os.environ.get('MONGO_URL', '')
+db_name = os.environ.get('DB_NAME', 'planora')
+
+if mongo_url:
+    client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+    db = client[db_name]
+else:
+    client = None
+    db = None
 
 # Resend config
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
@@ -1423,7 +1430,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origin_regex=".*",  # Safely allows Vercel dynamic URLs
     allow_methods=["*"],
     allow_headers=["*"],
 )
