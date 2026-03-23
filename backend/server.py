@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 import certifi
 
-client = None
-db = None
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+db = client[os.environ['DB_NAME']]
 
 # Resend config
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
@@ -61,13 +62,6 @@ GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
-
-@app.on_event("startup")
-async def startup_db_client():
-    global client, db
-    mongo_url = os.environ['MONGO_URL']
-    client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
-    db = client[os.environ['DB_NAME']]
 
 # --- WebSocket Connection Manager ---
 
