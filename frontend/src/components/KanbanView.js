@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Plus, GripVertical, Clock } from "lucide-react";
+import { Plus, GripVertical, Clock, Inbox, PlayCircle, CheckCircle2 } from "lucide-react";
 import { format, parseISO, isToday, isTomorrow, isBefore } from "date-fns";
+import { EmptyState } from "@/components/EmptyState";
 
 const CATEGORY_COLORS = {
   work: "bg-indigo-500",
@@ -20,7 +21,13 @@ const COLUMNS = [
   { id: "done", label: "Done", color: "border-emerald-500/30" },
 ];
 
+const EMPTY_ICONS = { todo: Inbox, in_progress: PlayCircle, done: CheckCircle2 };
 function formatDue(dateStr) {
+const EMPTY_MESSAGES = {
+  todo: { title: "Nothing to do", desc: "Add a task to get started" },
+  in_progress: { title: "Nothing in progress", desc: "Drag tasks here when you start working" },
+  done: { title: "No completed tasks", desc: "Finished tasks will appear here" },
+};
   if (!dateStr) return null;
   const d = parseISO(dateStr);
   if (isToday(d)) return "Today";
@@ -160,9 +167,17 @@ export function KanbanView({ tasks, onTaskClick, onUpdateTask, onCreateTask }) {
                   );
                 })}
                 {colTasks.length === 0 && (
-                  <div className="text-center py-8 text-xs text-muted-foreground">
-                    {col.id === "todo" ? "No tasks yet" : col.id === "in_progress" ? "Drag tasks here" : "Completed tasks appear here"}
-                  </div>
+                  <EmptyState
+                    icon={EMPTY_ICONS[col.id]}
+                    title={EMPTY_MESSAGES[col.id].title}
+                    description={EMPTY_MESSAGES[col.id].desc}
+                    action={col.id === "todo" && (
+                      <Button size="sm" variant="outline" onClick={onCreateTask} data-testid="kanban-empty-add-task">
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Task
+                      </Button>
+                    )}
+                    className="py-6"
+                  />
                 )}
               </div>
             </ScrollArea>

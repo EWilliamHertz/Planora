@@ -5,11 +5,13 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw,
   Unplug, CalendarDays, CheckCircle2, Download, Users, Trash2, Share2, Mail,
+  CreditCard, Zap, Crown, MailCheck, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -19,7 +21,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 export default function SettingsPage() {
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [gcalConnected, setGcalConnected] = useState(false);
   const [gcalLoading, setGcalLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -31,41 +33,87 @@ export default function SettingsPage() {
   const [shares, setShares] = useState({ shared_by_me: [], shared_with_me: [] });
   const [sharesLoading, setSharesLoading] = useState(true);
 
+  // Plans state
+  const [plans, setPlans] = useState([]);
+  const [currentPlan, setCurrentPlan] = useState("free");
+  const [subscribing, setSubscribing] = useState(null);
+
+  // Email digest state
+  const [digestEnabled, setDigestEnabled] = useState(false);
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [sendingDigest, setSendingDigest] = useState(false);
+
   const bookingLink = `${window.location.origin}/book/${user?.user_id}`;
 
+  // Check payment status on return from Stripe
   useEffect(() => {
-    const checkGcalStatus = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/gcal/status`, { credentials: "include" });
-        if (res.ok) {
-          const data = await res.json();
-          setGcalConnected(data.connected);
+    const sessionId = searchParams.get("session_id");
+    const payment = searchParams.get("payment");
+    if (sessionId && payment === "success") {
+      pollPaymentStatus(sessionId);
+      // Clean URL params
+      setSearchParams({}, { replace: true });
+    }
+    if (payment === "cancelled") {
+      toast.info("Payment cancelled");
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pollPaymentStatus = async (sessionId, attempts = 0) => {
+    if (attempts >= 5) {
+      toast.error("Payment status check timed out");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/subscribe/status/${sessionId}`, { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "paid" || data.payment_status === "paid") {
+          setCurrentPlan(data.plan_id);
+          toast.success(`Upgraded to ${data.plan_id.charAt(0).toUpperCase() + data.plan_id.slice(1)}!`);
+          return;
         }
+        if (data.status === "expired") {
+          toast.error("Payment session expired");
+          return;
+        }
+      }
+      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
+    } catch {
+      setTimeout(() => pollPaymentStatus(sessionId, attempts + 1), 2000);
+    }
+  };
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      try {
+        const [gcalRes, sharesRes, plansRes, planRes, prefsRes] = await Promise.all([
+          fetch(`${API_URL}/api/gcal/status`, { credentials: "include" }),
+          fetch(`${API_URL}/api/calendar/shares`, { credentials: "include" }),
+          fetch(`${API_URL}/api/plans`),
+          fetch(`${API_URL}/api/user/plan`, { credentials: "include" }),
+          fetch(`${API_URL}/api/user/preferences`, { credentials: "include" }),
+        ]);
+        if (gcalRes.ok) { const d = await gcalRes.json(); setGcalConnected(d.connected); }
+        if (sharesRes.ok) setShares(await sharesRes.json());
+        if (plansRes.ok) setPlans(await plansRes.json());
+        if (planRes.ok) { const d = await planRes.json(); setCurrentPlan(d.plan); }
+        if (prefsRes.ok) { const d = await prefsRes.json(); setDigestEnabled(d.email_digest || false); }
       } catch (e) {
-        console.error("Failed to check gcal status:", e);
+        console.error(e);
       }
       setGcalLoading(false);
+      setSharesLoading(false);
     };
-    checkGcalStatus();
+    fetchAll();
 
     if (searchParams.get("gcal") === "connected") {
       toast.success("Google Calendar connected!");
       setGcalConnected(true);
     }
-  }, [searchParams]);
-
-  // Fetch calendar shares
-  useEffect(() => {
-    const fetchShares = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/calendar/shares`, { credentials: "include" });
-        if (res.ok) setShares(await res.json());
-      } catch (e) {
-        console.error(e);
-      }
-      setSharesLoading(false);
-    };
-    fetchShares();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const connectGoogleCalendar = async () => {
@@ -77,7 +125,7 @@ export default function SettingsPage() {
       } else {
         toast.error("Google Calendar is not configured");
       }
-    } catch (e) {
+    } catch {
       toast.error("Failed to connect");
     }
   };
@@ -86,26 +134,17 @@ export default function SettingsPage() {
     setSyncing(true);
     try {
       const res = await fetch(`${API_URL}/api/gcal/sync`, { method: "POST", credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        toast.success(data.message || "Sync completed!");
-      } else toast.error("Sync failed");
-    } catch (e) {
-      toast.error("Sync failed");
-    }
+      if (res.ok) { const d = await res.json(); toast.success(d.message || "Sync completed!"); }
+      else toast.error("Sync failed");
+    } catch { toast.error("Sync failed"); }
     setSyncing(false);
   };
 
   const disconnectGoogleCalendar = async () => {
     try {
       const res = await fetch(`${API_URL}/api/gcal/disconnect`, { method: "POST", credentials: "include" });
-      if (res.ok) {
-        setGcalConnected(false);
-        toast.success("Google Calendar disconnected");
-      }
-    } catch (e) {
-      toast.error("Failed to disconnect");
-    }
+      if (res.ok) { setGcalConnected(false); toast.success("Google Calendar disconnected"); }
+    } catch { toast.error("Failed to disconnect"); }
   };
 
   const copyBookingLink = () => {
@@ -118,9 +157,7 @@ export default function SettingsPage() {
     setSharing(true);
     try {
       const res = await fetch(`${API_URL}/api/calendar/share`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ email: shareEmail.trim(), permission: sharePermission }),
       });
       if (res.ok) {
@@ -128,32 +165,67 @@ export default function SettingsPage() {
         setShares((prev) => ({ ...prev, shared_by_me: [...prev.shared_by_me, share] }));
         setShareEmail("");
         toast.success("Calendar shared!");
-      } else {
-        const err = await res.json();
-        toast.error(err.detail || "Failed to share");
-      }
-    } catch (e) {
-      toast.error("Failed to share");
-    }
+      } else { const err = await res.json(); toast.error(err.detail || "Failed to share"); }
+    } catch { toast.error("Failed to share"); }
     setSharing(false);
   };
 
   const revokeShare = async (shareId) => {
     try {
-      const res = await fetch(`${API_URL}/api/calendar/shares/${shareId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
+      const res = await fetch(`${API_URL}/api/calendar/shares/${shareId}`, { method: "DELETE", credentials: "include" });
       if (res.ok) {
-        setShares((prev) => ({
-          ...prev,
-          shared_by_me: prev.shared_by_me.filter((s) => s.share_id !== shareId),
-        }));
+        setShares((prev) => ({ ...prev, shared_by_me: prev.shared_by_me.filter((s) => s.share_id !== shareId) }));
         toast.success("Share revoked");
       }
-    } catch (e) {
-      toast.error("Failed to revoke share");
-    }
+    } catch { toast.error("Failed to revoke share"); }
+  };
+
+  const handleSubscribe = async (planId) => {
+    setSubscribing(planId);
+    try {
+      const res = await fetch(`${API_URL}/api/subscribe`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ plan_id: planId, origin_url: window.location.origin }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = data.url;
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Failed to start checkout");
+      }
+    } catch { toast.error("Failed to start checkout"); }
+    setSubscribing(null);
+  };
+
+  const toggleDigest = async (enabled) => {
+    setDigestLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/user/preferences/digest`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ enabled }),
+      });
+      if (res.ok) {
+        setDigestEnabled(enabled);
+        toast.success(enabled ? "Weekly digest enabled" : "Weekly digest disabled");
+      }
+    } catch { toast.error("Failed to update preference"); }
+    setDigestLoading(false);
+  };
+
+  const sendDigestNow = async () => {
+    setSendingDigest(true);
+    try {
+      const res = await fetch(`${API_URL}/api/digest/send`, { method: "POST", credentials: "include" });
+      if (res.ok) {
+        const d = await res.json();
+        toast.success(`Digest sent to ${d.email}`);
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Failed to send digest");
+      }
+    } catch { toast.error("Failed to send digest"); }
+    setSendingDigest(false);
   };
 
   const themes = [
@@ -161,6 +233,8 @@ export default function SettingsPage() {
     { value: "dark", label: "Dark", icon: Moon },
     { value: "system", label: "System", icon: Monitor },
   ];
+
+  const PLAN_ICONS = { free: Zap, pro: CreditCard, business: Crown };
 
   return (
     <div className="max-w-2xl mx-auto p-6 sm:p-8 animate-fadeIn" data-testid="settings-page">
@@ -170,34 +244,125 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Manage your profile, integrations, sharing, and booking link.
+          Manage your profile, plan, integrations, sharing, and booking link.
         </p>
       </div>
 
       {/* Profile Section */}
       <div className="bg-card border border-border rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">
-          Profile
-        </h2>
+        <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">Profile</h2>
         <div className="flex items-center gap-4">
           <Avatar className="h-16 w-16">
             <AvatarImage src={user?.picture} className="object-cover" />
-            <AvatarFallback className="text-lg font-bold">
-              {user?.name?.[0]?.toUpperCase()}
-            </AvatarFallback>
+            <AvatarFallback className="text-lg font-bold">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
           </Avatar>
           <div>
-            <h3 className="text-lg font-bold tracking-tight">{user?.name}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-bold tracking-tight">{user?.name}</h3>
+              <Badge variant="secondary" className="text-[10px] capitalize">{currentPlan}</Badge>
+            </div>
             <p className="text-sm text-muted-foreground">{user?.email}</p>
           </div>
         </div>
       </div>
 
+      {/* Subscription Plans */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="plans-section">
+        <div className="flex items-center gap-2 mb-4">
+          <Crown className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Subscription Plan</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {plans.map((plan) => {
+            const PlanIcon = PLAN_ICONS[plan.plan_id] || Zap;
+            const isCurrent = currentPlan === plan.plan_id;
+            return (
+              <div
+                key={plan.plan_id}
+                data-testid={`plan-card-${plan.plan_id}`}
+                className={cn(
+                  "rounded-xl border-2 p-4 transition-all",
+                  isCurrent ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"
+                )}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <PlanIcon className={cn("h-4 w-4", isCurrent ? "text-primary" : "text-muted-foreground")} />
+                  <span className="font-bold text-sm">{plan.name}</span>
+                </div>
+                <div className="mb-3">
+                  <span className="text-2xl font-bold">${plan.amount.toFixed(0)}</span>
+                  {plan.amount > 0 && <span className="text-xs text-muted-foreground">/mo</span>}
+                </div>
+                <ul className="space-y-1.5 mb-4">
+                  {plan.features.map((f, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Check className="h-3 w-3 text-primary mt-0.5 shrink-0" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                {isCurrent ? (
+                  <Button data-testid={`plan-current-${plan.plan_id}`} variant="outline" size="sm" className="w-full" disabled>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Current Plan
+                  </Button>
+                ) : plan.plan_id === "free" ? (
+                  <Button variant="ghost" size="sm" className="w-full text-muted-foreground" disabled>Free</Button>
+                ) : (
+                  <Button
+                    data-testid={`plan-subscribe-${plan.plan_id}`}
+                    size="sm"
+                    className="w-full"
+                    onClick={() => handleSubscribe(plan.plan_id)}
+                    disabled={subscribing === plan.plan_id}
+                  >
+                    {subscribing === plan.plan_id ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    Upgrade
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Email Digest */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="digest-section">
+        <div className="flex items-center gap-2 mb-4">
+          <MailCheck className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Weekly Email Digest</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Get a weekly summary of your upcoming events, completed tasks, and pending items delivered to your inbox.
+        </p>
+        <div className="flex items-center justify-between mb-4">
+          <Label htmlFor="digest-toggle" className="text-sm font-medium">Enable weekly digest</Label>
+          <Switch
+            id="digest-toggle"
+            data-testid="digest-toggle"
+            checked={digestEnabled}
+            onCheckedChange={toggleDigest}
+            disabled={digestLoading}
+          />
+        </div>
+        <Button
+          data-testid="send-digest-now-btn"
+          variant="outline"
+          size="sm"
+          onClick={sendDigestNow}
+          disabled={sendingDigest}
+        >
+          {sendingDigest ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+          Send Digest Now
+        </Button>
+      </div>
+
       {/* Theme Section */}
       <div className="bg-card border border-border rounded-xl p-5 mb-6">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">
-          Appearance
-        </h2>
+        <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">Appearance</h2>
         <div className="flex gap-3">
           {themes.map((t) => (
             <button
@@ -224,45 +389,29 @@ export default function SettingsPage() {
       <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="calendar-sharing-section">
         <div className="flex items-center gap-2 mb-4">
           <Share2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Calendar Sharing
-          </h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Calendar Sharing</h2>
         </div>
         <p className="text-sm text-muted-foreground mb-4">
           Share your calendar with others so they can view or edit your events.
         </p>
-
-        {/* Share form */}
         <div className="flex gap-2 mb-4">
           <Input
-            data-testid="share-email-input"
-            type="email"
-            value={shareEmail}
-            onChange={(e) => setShareEmail(e.target.value)}
-            placeholder="colleague@example.com"
-            className="flex-1"
+            data-testid="share-email-input" type="email" value={shareEmail}
+            onChange={(e) => setShareEmail(e.target.value)} placeholder="colleague@example.com" className="flex-1"
           />
           <select
-            data-testid="share-permission-select"
-            value={sharePermission}
+            data-testid="share-permission-select" value={sharePermission}
             onChange={(e) => setSharePermission(e.target.value)}
             className="h-9 px-3 rounded-md border border-border bg-background text-sm"
           >
             <option value="view">View</option>
             <option value="edit">Edit</option>
           </select>
-          <Button
-            data-testid="share-calendar-btn"
-            size="sm"
-            onClick={shareCalendar}
-            disabled={sharing || !shareEmail.trim()}
-          >
+          <Button data-testid="share-calendar-btn" size="sm" onClick={shareCalendar} disabled={sharing || !shareEmail.trim()}>
             {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4 mr-1" />}
             Share
           </Button>
         </div>
-
-        {/* Shared by me */}
         {shares.shared_by_me.length > 0 && (
           <div className="space-y-2 mb-4">
             <Label className="text-xs text-muted-foreground">Shared by you</Label>
@@ -274,21 +423,13 @@ export default function SettingsPage() {
                   <span className="text-xs text-muted-foreground">{share.shared_with_email}</span>
                 </div>
                 <Badge variant="outline" className="text-[10px] capitalize">{share.permission}</Badge>
-                <Button
-                  data-testid={`revoke-share-${share.share_id}`}
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => revokeShare(share.share_id)}
-                >
+                <Button data-testid={`revoke-share-${share.share_id}`} variant="ghost" size="icon" className="h-7 w-7" onClick={() => revokeShare(share.share_id)}>
                   <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </div>
             ))}
           </div>
         )}
-
-        {/* Shared with me */}
         {shares.shared_with_me.length > 0 && (
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Shared with you</Label>
@@ -304,11 +445,9 @@ export default function SettingsPage() {
             ))}
           </div>
         )}
-
         {sharesLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading shares...
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading shares...
           </div>
         )}
       </div>
@@ -317,18 +456,14 @@ export default function SettingsPage() {
       <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="gcal-section">
         <div className="flex items-center gap-2 mb-4">
           <CalendarDays className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Google Calendar
-          </h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Google Calendar</h2>
         </div>
         <p className="text-sm text-muted-foreground mb-4">
           Sync your Planora events with Google Calendar for two-way integration.
         </p>
-
         {gcalLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Checking connection...
+            <Loader2 className="h-4 w-4 animate-spin" /> Checking connection...
           </div>
         ) : gcalConnected ? (
           <div className="space-y-3">
@@ -342,15 +477,13 @@ export default function SettingsPage() {
                 Sync Now
               </Button>
               <Button data-testid="gcal-disconnect-btn" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={disconnectGoogleCalendar}>
-                <Unplug className="h-4 w-4 mr-2" />
-                Disconnect
+                <Unplug className="h-4 w-4 mr-2" /> Disconnect
               </Button>
             </div>
           </div>
         ) : (
           <Button data-testid="gcal-connect-btn" variant="outline" onClick={connectGoogleCalendar}>
-            <CalendarDays className="h-4 w-4 mr-2" />
-            Connect Google Calendar
+            <CalendarDays className="h-4 w-4 mr-2" /> Connect Google Calendar
           </Button>
         )}
       </div>
@@ -359,9 +492,7 @@ export default function SettingsPage() {
       <div className="bg-card border border-border rounded-xl p-5 mb-6">
         <div className="flex items-center gap-2 mb-4">
           <Link2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Booking Link
-          </h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Booking Link</h2>
         </div>
         <p className="text-sm text-muted-foreground mb-3">
           Share this link so others can book meetings with you during your available hours.
@@ -378,9 +509,7 @@ export default function SettingsPage() {
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <Download className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Export Calendar
-          </h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Export Calendar</h2>
         </div>
         <p className="text-sm text-muted-foreground mb-3">
           Download your events as an .ics file to import into Apple Calendar, Outlook, or other apps.
@@ -403,13 +532,12 @@ export default function SettingsPage() {
               } else {
                 toast.error("Export failed");
               }
-            } catch (e) {
+            } catch {
               toast.error("Export failed");
             }
           }}
         >
-          <Download className="h-4 w-4 mr-2" />
-          Download .ics File
+          <Download className="h-4 w-4 mr-2" /> Download .ics File
         </Button>
       </div>
     </div>

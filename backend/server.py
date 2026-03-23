@@ -18,6 +18,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 
 ROOT_DIR = Path(__file__).parent
 env_path = ROOT_DIR / '.env'
@@ -41,6 +42,16 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
+
+# Stripe config
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+
+# Subscription plans (amounts in dollars)
+SUBSCRIPTION_PLANS = {
+    "free": {"name": "Free", "amount": 0.0, "features": ["5 events/month", "Basic calendar views", "1 booking link"]},
+    "pro": {"name": "Pro", "amount": 9.00, "features": ["Unlimited events", "Google Calendar sync", "Custom booking links", "Email notifications", "Priority support"]},
+    "business": {"name": "Business", "amount": 29.00, "features": ["Everything in Pro", "Team workspaces", "Analytics dashboard", "Multi-calendar sharing", "Weekly email digest", "API access"]},
+}
 
 # Google Calendar config
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -321,7 +332,8 @@ async def get_me(request: Request):
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user["name"],
-        "picture": user.get("picture")
+        "picture": user.get("picture"),
+        "plan": user.get("plan", "free"),
     }
 
 @api_router.post("/auth/logout")
@@ -1164,6 +1176,227 @@ async def get_team(team_id: str, request: Request):
     if not team:
         raise HTTPException(status_code=404, detail="Team not found or no access")
     return team
+
+# --- Stripe Subscription Plans ---
+
+@api_router.get("/plans")
+async def get_plans():
+    return [{"plan_id": k, **v} for k, v in SUBSCRIPTION_PLANS.items()]
+
+@api_router.get("/user/plan")
+async def get_user_plan(request: Request):
+    user = await get_current_user(request)
+    full_user = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    plan = full_user.get("plan", "free")
+    return {"plan": plan, "plan_details": SUBSCRIPTION_PLANS.get(plan, SUBSCRIPTION_PLANS["free"])}
+
+class SubscriptionCheckout(BaseModel):
+    plan_id: str
+    origin_url: str
+
+@api_router.post("/subscribe")
+async def create_subscription(data: SubscriptionCheckout, request: Request):
+    user = await get_current_user(request)
+
+    if data.plan_id not in SUBSCRIPTION_PLANS or data.plan_id == "free":
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    plan = SUBSCRIPTION_PLANS[data.plan_id]
+    amount = plan["amount"]
+
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+    success_url = f"{data.origin_url}/settings?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{data.origin_url}/settings?payment=cancelled"
+
+    metadata = {
+        "user_id": user["user_id"],
+        "plan_id": data.plan_id,
+        "user_email": user["email"],
+    }
+
+    checkout_request = CheckoutSessionRequest(
+        amount=amount,
+        currency="usd",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata,
+    )
+    session = await stripe_checkout.create_checkout_session(checkout_request)
+
+    await db.payment_transactions.insert_one({
+        "session_id": session.session_id,
+        "user_id": user["user_id"],
+        "plan_id": data.plan_id,
+        "amount": amount,
+        "currency": "usd",
+        "metadata": metadata,
+        "payment_status": "initiated",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {"url": session.url, "session_id": session.session_id}
+
+@api_router.get("/subscribe/status/{session_id}")
+async def check_subscription_status(session_id: str, request: Request):
+    user = await get_current_user(request)
+
+    txn = await db.payment_transactions.find_one(
+        {"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if txn.get("payment_status") == "paid":
+        return {"status": "paid", "plan_id": txn["plan_id"]}
+
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    status = await stripe_checkout.get_checkout_status(session_id)
+
+    if status.payment_status == "paid":
+        await db.payment_transactions.update_one(
+            {"session_id": session_id},
+            {"$set": {"payment_status": "paid", "status": status.status, "paid_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        await db.users.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {"plan": txn["plan_id"]}}
+        )
+        return {"status": "paid", "plan_id": txn["plan_id"]}
+
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {"payment_status": status.payment_status, "status": status.status}}
+    )
+    return {"status": status.status, "payment_status": status.payment_status, "plan_id": txn["plan_id"]}
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        host_url = str(request.base_url).rstrip("/")
+        webhook_url = f"{host_url}api/webhook/stripe"
+        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+        event = await stripe_checkout.handle_webhook(body, sig)
+
+        if event.payment_status == "paid" and event.session_id:
+            txn = await db.payment_transactions.find_one(
+                {"session_id": event.session_id, "payment_status": {"$ne": "paid"}}, {"_id": 0}
+            )
+            if txn:
+                await db.payment_transactions.update_one(
+                    {"session_id": event.session_id},
+                    {"$set": {"payment_status": "paid", "status": "complete", "paid_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                await db.users.update_one(
+                    {"user_id": txn["user_id"]},
+                    {"$set": {"plan": txn["plan_id"]}}
+                )
+    except Exception as e:
+        logger.error(f"Stripe webhook error: {e}")
+
+    return {"received": True}
+
+# --- Email Digest ---
+
+class DigestPreference(BaseModel):
+    enabled: bool
+
+@api_router.get("/user/preferences")
+async def get_user_preferences(request: Request):
+    user = await get_current_user(request)
+    prefs = await db.user_preferences.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not prefs:
+        return {"user_id": user["user_id"], "email_digest": False}
+    return prefs
+
+@api_router.put("/user/preferences/digest")
+async def update_digest_preference(data: DigestPreference, request: Request):
+    user = await get_current_user(request)
+    await db.user_preferences.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"user_id": user["user_id"], "email_digest": data.enabled}},
+        upsert=True,
+    )
+    return {"user_id": user["user_id"], "email_digest": data.enabled}
+
+@api_router.post("/digest/send")
+async def send_weekly_digest(request: Request):
+    user = await get_current_user(request)
+    now = datetime.now(timezone.utc)
+    week_start = now - timedelta(days=7)
+    week_end = now + timedelta(days=7)
+
+    events = await db.events.find(
+        {"user_id": user["user_id"], "start_time": {"$gte": week_start.isoformat(), "$lte": week_end.isoformat()}},
+        {"_id": 0}
+    ).to_list(100)
+
+    tasks = await db.tasks.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(200)
+    pending_tasks = [t for t in tasks if not t.get("completed")]
+    completed_this_week = [t for t in tasks if t.get("completed")]
+
+    past_events = [e for e in events if e.get("start_time", "") < now.isoformat()]
+    upcoming_events = [e for e in events if e.get("start_time", "") >= now.isoformat()]
+
+    events_html = ""
+    for e in upcoming_events[:10]:
+        try:
+            dt = datetime.fromisoformat(e["start_time"].replace("Z", "+00:00"))
+            events_html += f'<li style="margin-bottom:8px;font-size:14px"><strong>{e["title"]}</strong> &mdash; {dt.strftime("%a, %b %d at %I:%M %p")}</li>'
+        except Exception:
+            events_html += f'<li style="margin-bottom:8px;font-size:14px"><strong>{e["title"]}</strong></li>'
+
+    tasks_html = ""
+    for t in pending_tasks[:10]:
+        tasks_html += f'<li style="margin-bottom:6px;font-size:14px">{t["title"]}</li>'
+
+    html = f"""<div style="font-family:'DM Sans',Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:32px;background:#f8f8fc;border-radius:16px">
+        <div style="background:#1e1b4b;color:#fff;padding:28px;border-radius:12px;margin-bottom:20px">
+            <h1 style="font-family:'Manrope',sans-serif;margin:0 0 6px;font-size:22px">Your Weekly Digest</h1>
+            <p style="color:#a5b4fc;margin:0;font-size:13px">{now.strftime('%b %d')} &mdash; {(now+timedelta(days=7)).strftime('%b %d, %Y')}</p>
+        </div>
+        <div style="background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:16px">
+            <h2 style="font-size:16px;margin:0 0 12px;color:#1e1b4b">This Week at a Glance</h2>
+            <div style="display:flex;gap:16px;margin-bottom:16px">
+                <div style="flex:1;text-align:center;padding:12px;background:#f1f0ff;border-radius:8px">
+                    <div style="font-size:24px;font-weight:700;color:#4338ca">{len(upcoming_events)}</div>
+                    <div style="font-size:12px;color:#6b7280">Upcoming</div>
+                </div>
+                <div style="flex:1;text-align:center;padding:12px;background:#ecfdf5;border-radius:8px">
+                    <div style="font-size:24px;font-weight:700;color:#059669">{len(completed_this_week)}</div>
+                    <div style="font-size:12px;color:#6b7280">Completed</div>
+                </div>
+                <div style="flex:1;text-align:center;padding:12px;background:#fef2f2;border-radius:8px">
+                    <div style="font-size:24px;font-weight:700;color:#dc2626">{len(pending_tasks)}</div>
+                    <div style="font-size:12px;color:#6b7280">Pending</div>
+                </div>
+            </div>
+        </div>
+        {"<div style='background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:16px'><h3 style='font-size:15px;margin:0 0 12px;color:#1e1b4b'>Upcoming Events</h3><ul style='list-style:none;padding:0;margin:0'>" + events_html + "</ul></div>" if events_html else ""}
+        {"<div style='background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb'><h3 style='font-size:15px;margin:0 0 12px;color:#1e1b4b'>Pending Tasks</h3><ul style='list-style:none;padding:0;margin:0'>" + tasks_html + "</ul></div>" if tasks_html else ""}
+        <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:20px">Powered by Planora</p>
+    </div>"""
+
+    if RESEND_API_KEY:
+        try:
+            resend.Emails.send({
+                "from": f"Planora <{SENDER_EMAIL}>",
+                "to": [user["email"]],
+                "subject": f"Your Planora Weekly Digest - {now.strftime('%b %d')}",
+                "html": html,
+            })
+            return {"message": "Digest sent", "email": user["email"]}
+        except Exception as e:
+            logger.error(f"Digest email error: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
+    else:
+        raise HTTPException(status_code=400, detail="Email service not configured")
 
 # --- WebSocket ---
 

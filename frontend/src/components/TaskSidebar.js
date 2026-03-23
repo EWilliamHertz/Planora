@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Plus, Clock, CalendarDays, Trash2 } from "lucide-react";
+import { Plus, Clock, CalendarDays, Trash2, ClipboardList, CalendarCheck } from "lucide-react";
 import { format, parseISO, isBefore, isToday, isTomorrow } from "date-fns";
+import { EmptyState } from "@/components/EmptyState";
 
 const EVENT_DOT_COLORS = {
   indigo: "bg-indigo-500",
@@ -98,9 +99,17 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-1.5">
           {sortedTasks.length === 0 && (
-            <div className="text-sm text-muted-foreground text-center py-8">
-              {categoryFilter ? `No ${categoryFilter} tasks` : "No tasks yet. Create one to get started."}
-            </div>
+            <EmptyState
+              icon={ClipboardList}
+              title={categoryFilter ? `No ${categoryFilter} tasks` : "No tasks yet"}
+              description={categoryFilter ? "Try a different filter or create a new task." : "Create your first task to start organizing your work."}
+              action={!categoryFilter && (
+                <Button data-testid="empty-create-task-btn" size="sm" variant="outline" onClick={onCreateTask}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> New Task
+                </Button>
+              )}
+              className="py-6"
+            />
           )}
           {sortedTasks.map((task, i) => {
             const dueLabel = formatDueLabel(task.due_date);
@@ -180,9 +189,12 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
           </div>
 
           {upcomingEvents.length === 0 && (
-            <div className="text-sm text-muted-foreground text-center py-4">
-              No upcoming events
-            </div>
+            <EmptyState
+              icon={CalendarCheck}
+              title="No upcoming events"
+              description="Your schedule is clear. Time to plan something new!"
+              className="py-4"
+            />
           )}
 
           <div className="space-y-2">
