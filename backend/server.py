@@ -613,149 +613,21 @@ async def seed_data(request: Request):
     user = await get_current_user(request)
     user_id = user["user_id"]
 
-    existing_events = await db.events.count_documents({"user_id": user_id})
-    if existing_events > 0:
-        return {"message": "Data already exists"}
+    # Only ensure default availability exists for new users
+    existing = await db.availability.find_one({"user_id": user_id})
+    if not existing:
+        default_schedule = {}
+        for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
+            default_schedule[day] = {"enabled": True, "start": "09:00", "end": "17:00"}
+        for day in ["saturday", "sunday"]:
+            default_schedule[day] = {"enabled": False, "start": "09:00", "end": "17:00"}
+        await db.availability.update_one(
+            {"user_id": user_id},
+            {"$set": {"user_id": user_id, "schedule": default_schedule, "slot_duration": 30}},
+            upsert=True
+        )
 
-    now = datetime.now(timezone.utc)
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    events = [
-        {
-            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Team Standup",
-            "description": "Daily team sync - discuss progress and blockers",
-            "start_time": (today + timedelta(hours=9)).isoformat(),
-            "end_time": (today + timedelta(hours=9, minutes=30)).isoformat(),
-            "color": "indigo",
-            "recurrence": {"type": "daily", "end_date": (today + timedelta(days=30)).isoformat()},
-            "attendees": [
-                {"name": "Sarah Chen", "email": "sarah@example.com", "status": "accepted",
-                 "avatar": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"},
-                {"name": "Alex Kim", "email": "alex@example.com", "status": "accepted",
-                 "avatar": "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85"}
-            ],
-            "created_at": now.isoformat()
-        },
-        {
-            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Client Meeting",
-            "description": "Q1 strategy review with Acme Corp",
-            "start_time": (today + timedelta(days=1, hours=14)).isoformat(),
-            "end_time": (today + timedelta(days=1, hours=15)).isoformat(),
-            "color": "emerald",
-            "attendees": [
-                {"name": "Jordan Lee", "email": "jordan@acme.com", "status": "accepted",
-                 "avatar": "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85"},
-                {"name": "Morgan Patel", "email": "morgan@acme.com", "status": "pending"}
-            ],
-            "created_at": now.isoformat()
-        },
-        {
-            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Product Review",
-            "description": "Sprint demo and feedback session",
-            "start_time": (today + timedelta(days=2, hours=10)).isoformat(),
-            "end_time": (today + timedelta(days=2, hours=11, minutes=30)).isoformat(),
-            "color": "amber",
-            "attendees": [
-                {"name": "Sarah Chen", "email": "sarah@example.com", "status": "accepted",
-                 "avatar": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"},
-                {"name": "Alex Kim", "email": "alex@example.com", "status": "declined",
-                 "avatar": "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85"},
-                {"name": "Jordan Lee", "email": "jordan@acme.com", "status": "pending",
-                 "avatar": "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85"}
-            ],
-            "created_at": now.isoformat()
-        },
-        {
-            "event_id": f"evt_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "1:1 with Sarah",
-            "description": "Weekly check-in and career development",
-            "start_time": (today + timedelta(hours=15)).isoformat(),
-            "end_time": (today + timedelta(hours=15, minutes=30)).isoformat(),
-            "color": "sky",
-            "recurrence": {"type": "weekly", "end_date": (today + timedelta(days=60)).isoformat()},
-            "attendees": [
-                {"name": "Sarah Chen", "email": "sarah@example.com", "status": "accepted",
-                 "avatar": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"}
-            ],
-            "created_at": now.isoformat()
-        }
-    ]
-
-    tasks = [
-        {
-            "task_id": f"task_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Prepare Q4 report",
-            "description": "Compile sales figures and growth metrics for quarterly review",
-            "due_date": (today + timedelta(days=1, hours=17)).isoformat(),
-            "completed": False,
-            "category": "work",
-            "created_at": now.isoformat()
-        },
-        {
-            "task_id": f"task_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Review PR #142",
-            "description": "Code review for the new authentication module",
-            "due_date": (today + timedelta(hours=12)).isoformat(),
-            "completed": True,
-            "category": "work",
-            "created_at": now.isoformat()
-        },
-        {
-            "task_id": f"task_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Update design specs",
-            "description": "Sync Figma designs with latest requirements from product",
-            "due_date": (today + timedelta(days=3, hours=17)).isoformat(),
-            "completed": False,
-            "category": "work",
-            "created_at": now.isoformat()
-        },
-        {
-            "task_id": f"task_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Send client proposal",
-            "description": "Draft and send the Q2 engagement proposal to Acme Corp",
-            "due_date": (today - timedelta(days=1)).isoformat(),
-            "completed": False,
-            "category": "urgent",
-            "created_at": now.isoformat()
-        },
-        {
-            "task_id": f"task_{uuid.uuid4().hex[:12]}",
-            "user_id": user_id,
-            "title": "Team building planning",
-            "description": "Organize team outing for next month - research venues",
-            "due_date": (today + timedelta(days=5, hours=17)).isoformat(),
-            "completed": True,
-            "category": "personal",
-            "created_at": now.isoformat()
-        }
-    ]
-
-    default_schedule = {}
-    for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
-        default_schedule[day] = {"enabled": True, "start": "09:00", "end": "17:00"}
-    for day in ["saturday", "sunday"]:
-        default_schedule[day] = {"enabled": False, "start": "09:00", "end": "17:00"}
-
-    await db.events.insert_many(events)
-    await db.tasks.insert_many(tasks)
-    await db.availability.update_one(
-        {"user_id": user_id},
-        {"$set": {"user_id": user_id, "schedule": default_schedule}},
-        upsert=True
-    )
-
-    return {"message": "Seed data created"}
+    return {"message": "ok"}
 
 # --- Google Calendar ---
 

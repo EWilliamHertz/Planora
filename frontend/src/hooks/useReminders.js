@@ -6,10 +6,14 @@ const CHECK_INTERVAL = 60000; // check every 60s
 
 export function useReminders() {
   const notifiedRef = useRef(new Set());
-  const permissionRef = useRef(Notification?.permission || "default");
+  const permissionRef = useRef(
+    typeof window !== "undefined" && "Notification" in window
+      ? Notification.permission
+      : "denied"
+  );
 
   const requestPermission = useCallback(async () => {
-    if (!("Notification" in window)) return false;
+    if (typeof window === "undefined" || !("Notification" in window)) return false;
     if (Notification.permission === "granted") {
       permissionRef.current = "granted";
       return true;

@@ -72,7 +72,6 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      await fetch(`${API_URL}/api/seed`, { method: "POST", credentials: "include" }).catch(() => {});
       const [eventsRes, tasksRes] = await Promise.all([
         fetch(`${API_URL}/api/events`, { credentials: "include" }),
         fetch(`${API_URL}/api/tasks`, { credentials: "include" }),
