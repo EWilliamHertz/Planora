@@ -8,7 +8,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 export default function AuthCallback() {
   const hasProcessed = useRef(false);
   const navigate = useNavigate();
-  const { setUser } = useAuth();
+  const { setUser, storeToken } = useAuth();
 
   useEffect(() => {
     if (hasProcessed.current) return;
@@ -34,8 +34,14 @@ export default function AuthCallback() {
         }
 
         const userData = await res.json();
+
+        // Persist the token so it survives page refreshes
+        if (userData.session_token) {
+          storeToken(userData.session_token);
+        }
+
         setUser(userData);
-        navigate('/dashboard', { replace: true, state: { user: userData } });
+        navigate('/dashboard', { replace: true });
       } catch (err) {
         console.error('Auth callback error:', err);
         navigate('/login', { replace: true });
@@ -43,7 +49,7 @@ export default function AuthCallback() {
     };
 
     processAuth();
-  }, [navigate, setUser]);
+  }, [navigate, setUser, storeToken]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background" data-testid="auth-callback">
