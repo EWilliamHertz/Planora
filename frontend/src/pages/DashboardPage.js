@@ -8,6 +8,7 @@ import { CalendarDayView } from "@/components/CalendarDayView";
 import { EventModal } from "@/components/EventModal";
 import { TaskModal } from "@/components/TaskModal";
 import { TaskSidebar } from "@/components/TaskSidebar";
+import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useReminders } from "@/hooks/useReminders";
 import {
@@ -49,6 +50,9 @@ export default function DashboardPage() {
   const [editingTask, setEditingTask] = useState(null);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem("planora_onboarded");
+  });
 
   // Real-time task updates via WebSocket
   const handleWsMessage = useCallback((data) => {
@@ -276,6 +280,17 @@ export default function DashboardPage() {
       <div className="flex-1 flex items-center justify-center h-full" data-testid="dashboard-loading">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  if (showOnboarding) {
+    return (
+      <OnboardingWizard
+        onComplete={() => {
+          setShowOnboarding(false);
+          fetchData();
+        }}
+      />
     );
   }
 

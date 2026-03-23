@@ -1,7 +1,7 @@
 {
-  "buildCommand": "yarn build",
-  "outputDirectory": "build",
-  "framework": "create-react-app",
+  "buildCommand": "cd frontend && yarn install && yarn build",
+  "outputDirectory": "frontend/build",
+  "framework": null,
   "rewrites": [
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
