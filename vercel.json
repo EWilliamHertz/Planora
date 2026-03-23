@@ -8,10 +8,10 @@
       "maxDuration": 30
     }
   },
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" },
-    { "source": "/((?!api).*)", "destination": "/index.html" }
-  ],
+ "rewrites": [
+  { "source": "/api/(.*)", "destination": "/api/index.py" },
+  { "source": "/((?!api).*)", "destination": "/index.html" }
+],
   "headers": [
     {
       "source": "/service-worker.js",
