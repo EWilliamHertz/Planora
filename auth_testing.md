@@ -26,7 +26,7 @@ print('User ID: ' + userId);
 
 ## Step 2: Test Backend API
 ```bash
-API_URL="https://collab-planner-test.preview.emergentagent.com"
+API_URL="https://availability-hub-22.preview.emergentagent.com"
 
 # Test auth endpoint
 curl -X GET "$API_URL/api/auth/me" \
@@ -51,7 +51,7 @@ await page.context.add_cookies([{
     "secure": True,
     "sameSite": "None"
 }])
-await page.goto("https://collab-planner-test.preview.emergentagent.com")
+await page.goto("https://availability-hub-22.preview.emergentagent.com")
 ```
 
 ## Checklist
