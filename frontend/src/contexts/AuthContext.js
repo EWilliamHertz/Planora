@@ -7,38 +7,13 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const exchangeOAuthSession = useCallback(async () => {
-    const hash = window.location.hash || "";
-    const match = hash.match(/session_id=([^&]+)/);
-    if (!match) return false;
-
-    const sessionId = match[1];
-    try {
-      const res = await fetch(`${API_URL}/api/auth/session?session_id=${sessionId}`, {
-        credentials: "include",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-        // Clean the hash from URL
-        window.history.replaceState(null, "", window.location.pathname);
-        return true;
-      }
-    } catch (e) {
-      console.error("OAuth session exchange failed:", e);
-    }
-    return false;
-  }, []);
-
   const checkAuth = useCallback(async () => {
-    // First try to exchange OAuth session_id if present in hash
+    // If there's a session_id hash, let AuthCallback handle it — don't race
     if (window.location.hash?.includes("session_id=")) {
-      const exchanged = await exchangeOAuthSession();
       setLoading(false);
-      if (exchanged) return;
+      return;
     }
 
-    // Otherwise check existing session cookie
     try {
       const res = await fetch(`${API_URL}/api/auth/me`, {
         credentials: "include",
@@ -51,7 +26,7 @@ export function AuthProvider({ children }) {
       // Not authenticated
     }
     setLoading(false);
-  }, [exchangeOAuthSession]);
+  }, []);
 
   useEffect(() => {
     checkAuth();
@@ -96,7 +71,7 @@ export function AuthProvider({ children }) {
         credentials: "include",
       });
     } catch (e) {
-      // Ignore errors
+      // Ignore
     }
     setUser(null);
   };
