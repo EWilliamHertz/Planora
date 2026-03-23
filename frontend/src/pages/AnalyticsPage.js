@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, authFetch } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, BarChart3, Users, Calendar, CheckSquare, TrendingUp, Clock } from "lucide-react";
@@ -21,7 +21,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/analytics`, { credentials: "include" });
+        const res = await authFetch(`${API_URL}/api/analytics`);
         if (res.ok) setData(await res.json());
       } catch (e) {
         console.error(e);

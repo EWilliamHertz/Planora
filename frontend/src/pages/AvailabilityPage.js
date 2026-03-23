@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, authFetch } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -36,14 +36,14 @@ export default function AvailabilityPage() {
   useEffect(() => {
     const fetchAvailability = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/availability`, { credentials: "include" });
+        const res = await authFetch(`${API_URL}/api/availability`);
         if (res.ok) {
           const data = await res.json();
           setSchedule(data.schedule || {});
           setSlotDuration(data.slot_duration || 30);
         }
       } catch (e) {
-        console.error("Failed to fetch availability:", e);
+        console.error("Failed to authFetch availability:", e);
       }
       setLoading(false);
     };
@@ -60,10 +60,9 @@ export default function AvailabilityPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/availability`, {
+      const res = await authFetch(`${API_URL}/api/availability`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ schedule, slot_duration: slotDuration }),
       });
       if (res.ok) {
