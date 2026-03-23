@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -12,7 +13,10 @@ import {
   LogOut,
   Share2,
   BarChart3,
+  Users,
 } from "lucide-react";
+
+const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -25,6 +29,22 @@ const navItems = [
 export function Sidebar({ onNavigate }) {
   const location = useLocation();
   const { user, logout } = useAuth();
+  const [sharedCalendars, setSharedCalendars] = useState([]);
+
+  useEffect(() => {
+    const fetchShares = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/calendar/shares`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          setSharedCalendars(data.shared_with_me || []);
+        }
+      } catch (e) {
+        // silently fail
+      }
+    };
+    fetchShares();
+  }, []);
 
   const handleLogout = async () => {
     await logout();
@@ -47,7 +67,7 @@ export function Sidebar({ onNavigate }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 space-y-1">
+      <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
         <p className="px-3 mb-2 text-xs font-medium uppercase tracking-widest text-muted-foreground">
           Menu
         </p>
@@ -68,6 +88,35 @@ export function Sidebar({ onNavigate }) {
             {item.label}
           </Link>
         ))}
+
+        {/* Shared Calendars */}
+        {sharedCalendars.length > 0 && (
+          <>
+            <p className="px-3 mt-6 mb-2 text-xs font-medium uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+              <Users className="h-3 w-3" />
+              Shared Calendars
+            </p>
+            {sharedCalendars.map((share) => (
+              <Link
+                key={share.share_id}
+                to={`/shared/${share.owner_user_id}`}
+                onClick={onNavigate}
+                data-testid={`shared-calendar-${share.share_id}`}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                  location.pathname === `/shared/${share.owner_user_id}`
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+              >
+                <Avatar className="h-5 w-5">
+                  <AvatarFallback className="text-[9px]">{share.owner_name?.[0]?.toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <span className="truncate">{share.owner_name || share.owner_email}</span>
+              </Link>
+            ))}
+          </>
+        )}
       </nav>
 
       {/* Theme toggle */}

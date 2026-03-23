@@ -8,6 +8,8 @@ import { CalendarDayView } from "@/components/CalendarDayView";
 import { EventModal } from "@/components/EventModal";
 import { TaskModal } from "@/components/TaskModal";
 import { TaskSidebar } from "@/components/TaskSidebar";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useReminders } from "@/hooks/useReminders";
 import {
   ChevronLeft,
   ChevronRight,
@@ -47,6 +49,26 @@ export default function DashboardPage() {
   const [editingTask, setEditingTask] = useState(null);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [loading, setLoading] = useState(true);
+
+  // Real-time task updates via WebSocket
+  const handleWsMessage = useCallback((data) => {
+    if (data.type === "task_update") {
+      if (data.action === "created") {
+        setTasks((prev) => {
+          if (prev.find((t) => t.task_id === data.task.task_id)) return prev;
+          return [...prev, data.task];
+        });
+      } else if (data.action === "updated") {
+        setTasks((prev) => prev.map((t) => t.task_id === data.task.task_id ? data.task : t));
+      } else if (data.action === "deleted") {
+        setTasks((prev) => prev.filter((t) => t.task_id !== data.task.task_id));
+      }
+    }
+  }, []);
+  useWebSocket(handleWsMessage);
+
+  // Event reminders
+  useReminders();
 
   const fetchData = useCallback(async () => {
     try {

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Response, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -48,6 +48,44 @@ GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
+# --- WebSocket Connection Manager ---
+
+class ConnectionManager:
+    def __init__(self):
+        self.active: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, user_id: str, ws: WebSocket):
+        await ws.accept()
+        self.active.setdefault(user_id, []).append(ws)
+
+    def disconnect(self, user_id: str, ws: WebSocket):
+        if user_id in self.active:
+            self.active[user_id] = [c for c in self.active[user_id] if c is not ws]
+            if not self.active[user_id]:
+                del self.active[user_id]
+
+    async def broadcast_to_user(self, user_id: str, message: dict):
+        for ws in self.active.get(user_id, []):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                pass
+
+    async def broadcast_task_update(self, user_id: str, action: str, task: dict):
+        # Send to the user and all users who share with them
+        shares = await db.calendar_shares.find(
+            {"$or": [{"owner_user_id": user_id}, {"shared_with_user_id": user_id}]},
+            {"_id": 0}
+        ).to_list(100)
+        target_ids = {user_id}
+        for s in shares:
+            target_ids.add(s["owner_user_id"])
+            target_ids.add(s.get("shared_with_user_id", ""))
+        for uid in target_ids:
+            await self.broadcast_to_user(uid, {"type": "task_update", "action": action, "task": task})
+
+ws_manager = ConnectionManager()
+
 # --- Pydantic Models ---
 
 class UserRegister(BaseModel):
@@ -66,7 +104,8 @@ class EventCreate(BaseModel):
     end_time: str
     color: Optional[str] = "indigo"
     attendees: Optional[List[Dict]] = []
-    recurrence: Optional[Dict] = None  # {type: "none"|"daily"|"weekly"|"monthly", end_date: "ISO"}
+    recurrence: Optional[Dict] = None
+    reminder: Optional[int] = None  # minutes before: 5, 15, 30, 60
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -76,6 +115,7 @@ class EventUpdate(BaseModel):
     color: Optional[str] = None
     attendees: Optional[List[Dict]] = None
     recurrence: Optional[Dict] = None
+    reminder: Optional[int] = None
 
 class TaskCreate(BaseModel):
     title: str
@@ -102,6 +142,10 @@ class BookingCreate(BaseModel):
     start_time: str
     end_time: str
     duration: Optional[int] = 30
+
+class CalendarShareCreate(BaseModel):
+    email: str
+    permission: Optional[str] = "view"  # "view" or "edit"
 
 # --- Auth Helper ---
 
@@ -301,6 +345,7 @@ async def create_event(data: EventCreate, request: Request):
         "color": data.color,
         "attendees": data.attendees,
         "recurrence": data.recurrence,
+        "reminder": data.reminder,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.events.insert_one(event_doc)
@@ -361,7 +406,9 @@ async def create_task(data: TaskCreate, request: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.tasks.insert_one(task_doc)
-    return {k: v for k, v in task_doc.items() if k != "_id"}
+    result_task = {k: v for k, v in task_doc.items() if k != "_id"}
+    await ws_manager.broadcast_task_update(user["user_id"], "created", result_task)
+    return result_task
 
 @api_router.put("/tasks/{task_id}")
 async def update_task(task_id: str, data: TaskUpdate, request: Request):
@@ -381,6 +428,7 @@ async def update_task(task_id: str, data: TaskUpdate, request: Request):
         raise HTTPException(status_code=404, detail="Task not found")
 
     task = await db.tasks.find_one({"task_id": task_id}, {"_id": 0})
+    await ws_manager.broadcast_task_update(user["user_id"], "updated", task)
     return task
 
 @api_router.delete("/tasks/{task_id}")
@@ -391,6 +439,7 @@ async def delete_task(task_id: str, request: Request):
     )
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
+    await ws_manager.broadcast_task_update(user["user_id"], "deleted", {"task_id": task_id})
     return {"message": "Deleted"}
 
 # --- Availability ---
@@ -1011,6 +1060,122 @@ async def export_ical(request: Request):
         media_type="text/calendar",
         headers={"Content-Disposition": f"attachment; filename=planora-{user['user_id']}.ics"}
     )
+
+# --- Calendar Sharing ---
+
+@api_router.post("/calendar/share")
+async def share_calendar(data: CalendarShareCreate, request: Request):
+    user = await get_current_user(request)
+    if data.email == user["email"]:
+        raise HTTPException(status_code=400, detail="Cannot share with yourself")
+
+    existing = await db.calendar_shares.find_one(
+        {"owner_user_id": user["user_id"], "shared_with_email": data.email}, {"_id": 0}
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Already shared with this user")
+
+    target_user = await db.users.find_one({"email": data.email}, {"_id": 0})
+    share_doc = {
+        "share_id": f"share_{uuid.uuid4().hex[:12]}",
+        "owner_user_id": user["user_id"],
+        "owner_name": user["name"],
+        "owner_email": user["email"],
+        "shared_with_email": data.email,
+        "shared_with_user_id": target_user["user_id"] if target_user else None,
+        "shared_with_name": target_user["name"] if target_user else data.email,
+        "permission": data.permission,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.calendar_shares.insert_one(share_doc)
+    return {k: v for k, v in share_doc.items() if k != "_id"}
+
+@api_router.get("/calendar/shares")
+async def list_shares(request: Request):
+    user = await get_current_user(request)
+    shared_by_me = await db.calendar_shares.find(
+        {"owner_user_id": user["user_id"]}, {"_id": 0}
+    ).to_list(100)
+    shared_with_me = await db.calendar_shares.find(
+        {"shared_with_email": user["email"]}, {"_id": 0}
+    ).to_list(100)
+    return {"shared_by_me": shared_by_me, "shared_with_me": shared_with_me}
+
+@api_router.delete("/calendar/shares/{share_id}")
+async def revoke_share(share_id: str, request: Request):
+    user = await get_current_user(request)
+    result = await db.calendar_shares.delete_one(
+        {"share_id": share_id, "owner_user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Share not found")
+    return {"message": "Share revoked"}
+
+@api_router.get("/calendar/shared/{user_id}/events")
+async def get_shared_events(user_id: str, request: Request):
+    viewer = await get_current_user(request)
+    share = await db.calendar_shares.find_one(
+        {"owner_user_id": user_id, "shared_with_email": viewer["email"]}, {"_id": 0}
+    )
+    if not share:
+        raise HTTPException(status_code=403, detail="No access to this calendar")
+    events = await db.events.find({"user_id": user_id}, {"_id": 0}).to_list(1000)
+    return events
+
+# --- Reminders ---
+
+@api_router.get("/reminders/upcoming")
+async def get_upcoming_reminders(request: Request):
+    user = await get_current_user(request)
+    now = datetime.now(timezone.utc)
+    window_end = (now + timedelta(hours=1)).isoformat()
+
+    events = await db.events.find(
+        {"user_id": user["user_id"], "reminder": {"$ne": None}, "start_time": {"$lte": window_end}},
+        {"_id": 0}
+    ).to_list(100)
+
+    due_reminders = []
+    for evt in events:
+        try:
+            start = datetime.fromisoformat(evt["start_time"].replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            reminder_mins = evt.get("reminder", 0)
+            if not reminder_mins:
+                continue
+            reminder_time = start - timedelta(minutes=reminder_mins)
+            if reminder_time <= now <= start:
+                due_reminders.append({
+                    "event_id": evt["event_id"],
+                    "title": evt["title"],
+                    "start_time": evt["start_time"],
+                    "reminder": reminder_mins,
+                    "minutes_until": max(0, int((start - now).total_seconds() / 60))
+                })
+        except Exception:
+            continue
+
+    return due_reminders
+
+# --- WebSocket ---
+
+@app.websocket("/api/ws/{session_token}")
+async def websocket_endpoint(websocket: WebSocket, session_token: str):
+    session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
+    if not session:
+        await websocket.close(code=4001)
+        return
+
+    user_id = session["user_id"]
+    await ws_manager.connect(user_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(user_id, websocket)
+    except Exception:
+        ws_manager.disconnect(user_id, websocket)
 
 # Include router
 app.include_router(api_router)

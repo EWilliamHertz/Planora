@@ -7,7 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw, Unplug, CalendarDays, CheckCircle2, XCircle, Download } from "lucide-react";
+import {
+  Settings, Sun, Moon, Monitor, Link2, Copy, Loader2, RefreshCw,
+  Unplug, CalendarDays, CheckCircle2, Download, Users, Trash2, Share2, Mail,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +23,13 @@ export default function SettingsPage() {
   const [gcalConnected, setGcalConnected] = useState(false);
   const [gcalLoading, setGcalLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+
+  // Calendar sharing state
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState("view");
+  const [sharing, setSharing] = useState(false);
+  const [shares, setShares] = useState({ shared_by_me: [], shared_with_me: [] });
+  const [sharesLoading, setSharesLoading] = useState(true);
 
   const bookingLink = `${window.location.origin}/book/${user?.user_id}`;
 
@@ -44,6 +54,20 @@ export default function SettingsPage() {
     }
   }, [searchParams]);
 
+  // Fetch calendar shares
+  useEffect(() => {
+    const fetchShares = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/calendar/shares`, { credentials: "include" });
+        if (res.ok) setShares(await res.json());
+      } catch (e) {
+        console.error(e);
+      }
+      setSharesLoading(false);
+    };
+    fetchShares();
+  }, []);
+
   const connectGoogleCalendar = async () => {
     try {
       const res = await fetch(`${API_URL}/api/gcal/connect`, { credentials: "include" });
@@ -61,16 +85,11 @@ export default function SettingsPage() {
   const syncGoogleCalendar = async () => {
     setSyncing(true);
     try {
-      const res = await fetch(`${API_URL}/api/gcal/sync`, {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await fetch(`${API_URL}/api/gcal/sync`, { method: "POST", credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         toast.success(data.message || "Sync completed!");
-      } else {
-        toast.error("Sync failed");
-      }
+      } else toast.error("Sync failed");
     } catch (e) {
       toast.error("Sync failed");
     }
@@ -79,10 +98,7 @@ export default function SettingsPage() {
 
   const disconnectGoogleCalendar = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/gcal/disconnect`, {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await fetch(`${API_URL}/api/gcal/disconnect`, { method: "POST", credentials: "include" });
       if (res.ok) {
         setGcalConnected(false);
         toast.success("Google Calendar disconnected");
@@ -95,6 +111,49 @@ export default function SettingsPage() {
   const copyBookingLink = () => {
     navigator.clipboard.writeText(bookingLink);
     toast.success("Booking link copied!");
+  };
+
+  const shareCalendar = async () => {
+    if (!shareEmail.trim()) return;
+    setSharing(true);
+    try {
+      const res = await fetch(`${API_URL}/api/calendar/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: shareEmail.trim(), permission: sharePermission }),
+      });
+      if (res.ok) {
+        const share = await res.json();
+        setShares((prev) => ({ ...prev, shared_by_me: [...prev.shared_by_me, share] }));
+        setShareEmail("");
+        toast.success("Calendar shared!");
+      } else {
+        const err = await res.json();
+        toast.error(err.detail || "Failed to share");
+      }
+    } catch (e) {
+      toast.error("Failed to share");
+    }
+    setSharing(false);
+  };
+
+  const revokeShare = async (shareId) => {
+    try {
+      const res = await fetch(`${API_URL}/api/calendar/shares/${shareId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setShares((prev) => ({
+          ...prev,
+          shared_by_me: prev.shared_by_me.filter((s) => s.share_id !== shareId),
+        }));
+        toast.success("Share revoked");
+      }
+    } catch (e) {
+      toast.error("Failed to revoke share");
+    }
   };
 
   const themes = [
@@ -111,7 +170,7 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Manage your profile, integrations, and booking link.
+          Manage your profile, integrations, sharing, and booking link.
         </p>
       </div>
 
@@ -152,19 +211,106 @@ export default function SettingsPage() {
               )}
               onClick={() => setTheme(t.value)}
             >
-              <t.icon className={cn(
-                "h-5 w-5",
-                theme === t.value ? "text-primary" : "text-muted-foreground"
-              )} />
-              <span className={cn(
-                "text-sm font-medium",
-                theme === t.value ? "text-primary" : "text-muted-foreground"
-              )}>
+              <t.icon className={cn("h-5 w-5", theme === t.value ? "text-primary" : "text-muted-foreground")} />
+              <span className={cn("text-sm font-medium", theme === t.value ? "text-primary" : "text-muted-foreground")}>
                 {t.label}
               </span>
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Calendar Sharing */}
+      <div className="bg-card border border-border rounded-xl p-5 mb-6" data-testid="calendar-sharing-section">
+        <div className="flex items-center gap-2 mb-4">
+          <Share2 className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+            Calendar Sharing
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Share your calendar with others so they can view or edit your events.
+        </p>
+
+        {/* Share form */}
+        <div className="flex gap-2 mb-4">
+          <Input
+            data-testid="share-email-input"
+            type="email"
+            value={shareEmail}
+            onChange={(e) => setShareEmail(e.target.value)}
+            placeholder="colleague@example.com"
+            className="flex-1"
+          />
+          <select
+            data-testid="share-permission-select"
+            value={sharePermission}
+            onChange={(e) => setSharePermission(e.target.value)}
+            className="h-9 px-3 rounded-md border border-border bg-background text-sm"
+          >
+            <option value="view">View</option>
+            <option value="edit">Edit</option>
+          </select>
+          <Button
+            data-testid="share-calendar-btn"
+            size="sm"
+            onClick={shareCalendar}
+            disabled={sharing || !shareEmail.trim()}
+          >
+            {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4 mr-1" />}
+            Share
+          </Button>
+        </div>
+
+        {/* Shared by me */}
+        {shares.shared_by_me.length > 0 && (
+          <div className="space-y-2 mb-4">
+            <Label className="text-xs text-muted-foreground">Shared by you</Label>
+            {shares.shared_by_me.map((share) => (
+              <div key={share.share_id} data-testid={`share-item-${share.share_id}`} className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/50">
+                <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium truncate block">{share.shared_with_name || share.shared_with_email}</span>
+                  <span className="text-xs text-muted-foreground">{share.shared_with_email}</span>
+                </div>
+                <Badge variant="outline" className="text-[10px] capitalize">{share.permission}</Badge>
+                <Button
+                  data-testid={`revoke-share-${share.share_id}`}
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => revokeShare(share.share_id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Shared with me */}
+        {shares.shared_with_me.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Shared with you</Label>
+            {shares.shared_with_me.map((share) => (
+              <div key={share.share_id} data-testid={`shared-with-me-${share.share_id}`} className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/50">
+                <CalendarDays className="h-4 w-4 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium truncate block">{share.owner_name}</span>
+                  <span className="text-xs text-muted-foreground">{share.owner_email}</span>
+                </div>
+                <Badge variant="outline" className="text-[10px] capitalize">{share.permission}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {sharesLoading && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading shares...
+          </div>
+        )}
       </div>
 
       {/* Google Calendar Section */}
@@ -191,38 +337,18 @@ export default function SettingsPage() {
               <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Connected</span>
             </div>
             <div className="flex gap-2">
-              <Button
-                data-testid="gcal-sync-btn"
-                variant="outline"
-                size="sm"
-                onClick={syncGoogleCalendar}
-                disabled={syncing}
-              >
-                {syncing ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                )}
+              <Button data-testid="gcal-sync-btn" variant="outline" size="sm" onClick={syncGoogleCalendar} disabled={syncing}>
+                {syncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 Sync Now
               </Button>
-              <Button
-                data-testid="gcal-disconnect-btn"
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={disconnectGoogleCalendar}
-              >
+              <Button data-testid="gcal-disconnect-btn" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={disconnectGoogleCalendar}>
                 <Unplug className="h-4 w-4 mr-2" />
                 Disconnect
               </Button>
             </div>
           </div>
         ) : (
-          <Button
-            data-testid="gcal-connect-btn"
-            variant="outline"
-            onClick={connectGoogleCalendar}
-          >
+          <Button data-testid="gcal-connect-btn" variant="outline" onClick={connectGoogleCalendar}>
             <CalendarDays className="h-4 w-4 mr-2" />
             Connect Google Calendar
           </Button>
@@ -241,18 +367,8 @@ export default function SettingsPage() {
           Share this link so others can book meetings with you during your available hours.
         </p>
         <div className="flex gap-2">
-          <Input
-            data-testid="booking-link-input"
-            readOnly
-            value={bookingLink}
-            className="font-mono text-xs"
-          />
-          <Button
-            data-testid="copy-booking-link-btn"
-            variant="outline"
-            size="icon"
-            onClick={copyBookingLink}
-          >
+          <Input data-testid="booking-link-input" readOnly value={bookingLink} className="font-mono text-xs" />
+          <Button data-testid="copy-booking-link-btn" variant="outline" size="icon" onClick={copyBookingLink}>
             <Copy className="h-4 w-4" />
           </Button>
         </div>

@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, X, Search, Users, Repeat } from "lucide-react";
+import { Trash2, X, Search, Users, Repeat, Bell } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +57,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [showSearch, setShowSearch] = useState(false);
   const [recurrenceType, setRecurrenceType] = useState("none");
   const [recurrenceEnd, setRecurrenceEnd] = useState("");
+  const [reminder, setReminder] = useState("none");
 
   useEffect(() => {
     if (event) {
@@ -68,6 +69,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setAttendees(event.attendees || []);
       setRecurrenceType(event.recurrence?.type || "none");
       setRecurrenceEnd(event.recurrence?.end_date ? event.recurrence.end_date.slice(0, 10) : "");
+      setReminder(event.reminder ? String(event.reminder) : "none");
     } else if (selectedDate) {
       setTitle("");
       setDescription("");
@@ -81,6 +83,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setAttendees([]);
       setRecurrenceType("none");
       setRecurrenceEnd("");
+      setReminder("none");
     }
     setSearchQuery("");
     setShowSearch(false);
@@ -99,6 +102,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       color,
       attendees,
       recurrence,
+      reminder: reminder !== "none" ? parseInt(reminder) : null,
     };
     const targetId = event?.original_event_id || event?.event_id;
     if (event) {
@@ -304,6 +308,38 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                 ))}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Reminder */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-muted-foreground" />
+            <Label>Reminder</Label>
+          </div>
+          <div className="flex gap-2 flex-wrap" data-testid="event-reminder-selector">
+            {[
+              { value: "none", label: "None" },
+              { value: "5", label: "5 min" },
+              { value: "15", label: "15 min" },
+              { value: "30", label: "30 min" },
+              { value: "60", label: "1 hour" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                data-testid={`reminder-${opt.value}`}
+                type="button"
+                className={cn(
+                  "px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                  reminder === opt.value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-accent/50"
+                )}
+                onClick={() => setReminder(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
