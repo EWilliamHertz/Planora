@@ -62,7 +62,8 @@ def _clean_db_url(url: str) -> str:
     return url
 
 DATABASE_URL: str = _clean_db_url(os.environ.get('DATABASE_URL', ''))
-db_pool: asyncpg.Pool = None  # set during startup
+db_pool: asyncpg.Pool = None  # lazily initialized on first request
+_schema_initialized: bool = False
 
 async def _init_conn(conn):
     """Register JSON/JSONB codecs so dicts/lists pass through automatically."""
@@ -204,6 +205,27 @@ def _build_update(fields: dict, start_idx: int = 2):
         clauses.append(f"{k} = ${start_idx + len(values) - 1}")
     return ", ".join(clauses), values
 
+async def get_pool() -> asyncpg.Pool:
+    """Lazily create the DB pool and run schema init. Required for Vercel serverless
+    because @app.on_event('startup') is never called in that environment."""
+    global db_pool, _schema_initialized
+    if db_pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
+        db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=5)
+        logger.info("Database pool created (lazy init)")
+    if not _schema_initialized:
+        async with db_pool.acquire() as conn:
+            stmts = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
+            for i, stmt in enumerate(stmts):
+                try:
+                    await conn.execute(stmt)
+                except Exception as e:
+                    logger.warning(f"Schema statement {i+1} skipped: {e}")
+        _schema_initialized = True
+        logger.info("Database schema initialized")
+    return db_pool
+
 # ── WebSocket Manager ────────────────────────────────────────────────────────
 
 class ConnectionManager:
@@ -228,7 +250,7 @@ class ConnectionManager:
                 pass
 
     async def broadcast_task_update(self, user_id: str, action: str, task: dict):
-        async with db_pool.acquire() as conn:
+        async with (await get_pool()).acquire() as conn:
             shares = await conn.fetch(
                 "SELECT owner_user_id, shared_with_user_id FROM calendar_shares "
                 "WHERE owner_user_id = $1 OR shared_with_user_id = $1",
@@ -331,7 +353,7 @@ async def get_current_user(request: Request):
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         session = _row(await conn.fetchrow(
             "SELECT * FROM user_sessions WHERE session_token = $1", session_token
         ))
@@ -355,7 +377,7 @@ async def get_current_user(request: Request):
 
 async def create_session(user_id: str, response: Response) -> str:
     session_token = f"sess_{uuid.uuid4().hex}"
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO user_sessions (session_token, user_id, expires_at, created_at) VALUES ($1,$2,$3,$4)",
             session_token, user_id,
@@ -378,7 +400,7 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.post("/auth/register")
 async def register(data: UserRegister, response: Response):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         existing = await conn.fetchrow("SELECT user_id FROM users WHERE email = $1", data.email)
         if existing:
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -394,7 +416,7 @@ async def register(data: UserRegister, response: Response):
 
 @api_router.post("/auth/login")
 async def login(data: UserLogin, response: Response):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         user = _row(await conn.fetchrow("SELECT * FROM users WHERE email = $1", data.email))
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -425,7 +447,7 @@ async def process_google_session(session_id: str, response: Response):
     name = data.get("name", email.split("@")[0])
     picture = data.get("picture")
 
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         existing = _row(await conn.fetchrow("SELECT user_id FROM users WHERE email = $1", email))
         if existing:
             user_id = existing["user_id"]
@@ -449,7 +471,7 @@ async def get_me(request: Request):
 async def logout(request: Request, response: Response):
     session_token = request.cookies.get("session_token")
     if session_token:
-        async with db_pool.acquire() as conn:
+        async with (await get_pool()).acquire() as conn:
             await conn.execute("DELETE FROM user_sessions WHERE session_token=$1", session_token)
     response.set_cookie(key="session_token", value="", httponly=True, secure=True,
                         samesite="none", path="/", max_age=0)
@@ -460,7 +482,7 @@ async def logout(request: Request, response: Response):
 @api_router.get("/events")
 async def list_events(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch("SELECT * FROM events WHERE user_id=$1 ORDER BY start_time", user["user_id"])
     return _rows(rows)
 
@@ -469,7 +491,7 @@ async def create_event(data: EventCreate, request: Request):
     user = await get_current_user(request)
     event_id = f"evt_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,created_at) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
@@ -487,7 +509,7 @@ async def update_event(event_id: str, data: EventUpdate, request: Request):
     if not update_fields:
         raise HTTPException(status_code=400, detail="No data to update")
     set_clause, values = _build_update(update_fields, start_idx=2)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         result = await conn.execute(
             f"UPDATE events SET {set_clause} WHERE event_id=$1 AND user_id=${len(values)+2}",
             event_id, *values, user["user_id"]
@@ -499,7 +521,7 @@ async def update_event(event_id: str, data: EventUpdate, request: Request):
 @api_router.delete("/events/{event_id}")
 async def delete_event(event_id: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         result = await conn.execute(
             "DELETE FROM events WHERE event_id=$1 AND user_id=$2", event_id, user["user_id"]
         )
@@ -512,7 +534,7 @@ async def delete_event(event_id: str, request: Request):
 @api_router.get("/tasks")
 async def list_tasks_endpoint(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch("SELECT * FROM tasks WHERE user_id=$1 ORDER BY created_at DESC", user["user_id"])
     return _rows(rows)
 
@@ -521,7 +543,7 @@ async def create_task(data: TaskCreate, request: Request):
     user = await get_current_user(request)
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO tasks (task_id,user_id,title,description,due_date,completed,category,status,created_at) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
@@ -539,7 +561,7 @@ async def update_task(task_id: str, data: TaskUpdate, request: Request):
     if not update_fields:
         raise HTTPException(status_code=400, detail="No data to update")
     set_clause, values = _build_update(update_fields, start_idx=2)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         result = await conn.execute(
             f"UPDATE tasks SET {set_clause} WHERE task_id=$1 AND user_id=${len(values)+2}",
             task_id, *values, user["user_id"]
@@ -553,7 +575,7 @@ async def update_task(task_id: str, data: TaskUpdate, request: Request):
 @api_router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         result = await conn.execute(
             "DELETE FROM tasks WHERE task_id=$1 AND user_id=$2", task_id, user["user_id"]
         )
@@ -572,7 +594,7 @@ DEFAULT_SCHEDULE = {
 @api_router.get("/availability")
 async def get_availability(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         row = _row(await conn.fetchrow("SELECT * FROM availability WHERE user_id=$1", user["user_id"]))
     if not row:
         return {"user_id": user["user_id"], "schedule": DEFAULT_SCHEDULE, "slot_duration": 30}
@@ -582,7 +604,7 @@ async def get_availability(request: Request):
 async def update_availability(data: AvailabilityUpdate, request: Request):
     user = await get_current_user(request)
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO availability (user_id, schedule, slot_duration, updated_at) VALUES ($1,$2,$3,$4) "
             "ON CONFLICT (user_id) DO UPDATE SET schedule=$2, slot_duration=$3, updated_at=$4",
@@ -594,7 +616,7 @@ async def update_availability(data: AvailabilityUpdate, request: Request):
 
 @api_router.get("/bookings/user/{user_id}")
 async def get_user_booking_info(user_id: str):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         user = _row(await conn.fetchrow("SELECT user_id, name FROM users WHERE user_id=$1", user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -602,7 +624,7 @@ async def get_user_booking_info(user_id: str):
 
 @api_router.get("/bookings/available/{user_id}")
 async def get_available_slots(user_id: str, date: str):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         avail_row = _row(await conn.fetchrow("SELECT * FROM availability WHERE user_id=$1", user_id))
 
     slot_duration = 30
@@ -623,7 +645,7 @@ async def get_available_slots(user_id: str, date: str):
     current = datetime(target_date.year, target_date.month, target_date.day, start_hour, start_min, tzinfo=timezone.utc)
     end    = datetime(target_date.year, target_date.month, target_date.day, end_hour,   end_min,   tzinfo=timezone.utc)
 
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         existing_events = _rows(await conn.fetch(
             "SELECT start_time, end_time FROM events WHERE user_id=$1 AND start_time >= $2 AND start_time < $3",
             user_id, current.isoformat(), end.isoformat()
@@ -649,7 +671,7 @@ async def get_available_slots(user_id: str, date: str):
 async def create_booking(data: BookingCreate):
     booking_id = f"book_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO bookings (booking_id,host_user_id,guest_name,guest_email,start_time,end_time,duration,created_at) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
@@ -691,7 +713,7 @@ async def create_booking(data: BookingCreate):
 @api_router.get("/bookings")
 async def list_bookings(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch("SELECT * FROM bookings WHERE host_user_id=$1 ORDER BY start_time DESC", user["user_id"])
     return _rows(rows)
 
@@ -700,7 +722,7 @@ async def list_bookings(request: Request):
 @api_router.post("/seed")
 async def seed_data(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO availability (user_id, schedule, slot_duration, updated_at) VALUES ($1,$2,$3,$4) "
             "ON CONFLICT (user_id) DO NOTHING",
@@ -738,7 +760,7 @@ async def gcal_callback(code: str, state: str, response: Response):
                       "token_uri": creds.token_uri, "client_id": creds.client_id,
                       "client_secret": creds.client_secret,
                       "scopes": list(creds.scopes) if creds.scopes else GCAL_SCOPES}
-        async with db_pool.acquire() as conn:
+        async with (await get_pool()).acquire() as conn:
             await conn.execute("UPDATE users SET google_calendar_tokens=$1 WHERE user_id=$2",
                                token_data, state)
     except Exception as e:
@@ -749,7 +771,7 @@ async def gcal_callback(code: str, state: str, response: Response):
 @api_router.get("/gcal/status")
 async def gcal_status(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         row = _row(await conn.fetchrow("SELECT google_calendar_tokens FROM users WHERE user_id=$1", user["user_id"]))
     connected = bool(row and row.get("google_calendar_tokens"))
     return {"connected": connected}
@@ -757,7 +779,7 @@ async def gcal_status(request: Request):
 @api_router.post("/gcal/sync")
 async def gcal_sync(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         full_user = _row(await conn.fetchrow("SELECT * FROM users WHERE user_id=$1", user["user_id"]))
     tokens = full_user.get("google_calendar_tokens") if full_user else None
     if not tokens:
@@ -770,7 +792,7 @@ async def gcal_sync(request: Request):
                             scopes=tokens.get("scopes", GCAL_SCOPES))
         if creds.expired and creds.refresh_token:
             creds.refresh(GoogleRequest())
-            async with db_pool.acquire() as conn:
+            async with (await get_pool()).acquire() as conn:
                 updated_tokens = {**tokens, "token": creds.token}
                 await conn.execute("UPDATE users SET google_calendar_tokens=$1 WHERE user_id=$2",
                                    updated_tokens, user["user_id"])
@@ -793,7 +815,7 @@ async def gcal_sync(request: Request):
             gcal_id    = gcal_event.get('id', '')
             if not start_time or not end_time:
                 continue
-            async with db_pool.acquire() as conn:
+            async with (await get_pool()).acquire() as conn:
                 existing = await conn.fetchrow(
                     "SELECT event_id FROM events WHERE user_id=$1 AND gcal_id=$2", user["user_id"], gcal_id
                 )
@@ -815,7 +837,7 @@ async def gcal_sync(request: Request):
                     imported += 1
 
         exported = 0
-        async with db_pool.acquire() as conn:
+        async with (await get_pool()).acquire() as conn:
             planora_events = _rows(await conn.fetch(
                 "SELECT * FROM events WHERE user_id=$1 AND gcal_id IS NULL", user["user_id"]
             ))
@@ -826,7 +848,7 @@ async def gcal_sync(request: Request):
                     'start': {'dateTime': evt['start_time'], 'timeZone': 'UTC'},
                     'end':   {'dateTime': evt['end_time'],   'timeZone': 'UTC'},
                 }).execute()
-                async with db_pool.acquire() as conn:
+                async with (await get_pool()).acquire() as conn:
                     await conn.execute("UPDATE events SET gcal_id=$1 WHERE event_id=$2",
                                        result.get('id', ''), evt["event_id"])
                 exported += 1
@@ -842,7 +864,7 @@ async def gcal_sync(request: Request):
 @api_router.post("/gcal/disconnect")
 async def gcal_disconnect(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute("UPDATE users SET google_calendar_tokens=NULL WHERE user_id=$1", user["user_id"])
     return {"message": "Disconnected"}
 
@@ -852,7 +874,7 @@ async def gcal_disconnect(request: Request):
 async def get_analytics(request: Request):
     user = await get_current_user(request)
     uid = user["user_id"]
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         events   = _rows(await conn.fetch("SELECT * FROM events   WHERE user_id=$1",      uid))
         tasks    = _rows(await conn.fetch("SELECT * FROM tasks    WHERE user_id=$1",      uid))
         bookings = _rows(await conn.fetch("SELECT * FROM bookings WHERE host_user_id=$1", uid))
@@ -910,7 +932,7 @@ async def get_analytics(request: Request):
 @api_router.get("/export/ical")
 async def export_ical(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         events = _rows(await conn.fetch("SELECT * FROM events WHERE user_id=$1", user["user_id"]))
 
     def to_ical_dt(iso_str):
@@ -957,7 +979,7 @@ async def share_calendar(data: CalendarShareCreate, request: Request):
     user = await get_current_user(request)
     if data.email == user["email"]:
         raise HTTPException(status_code=400, detail="Cannot share with yourself")
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         existing = await conn.fetchrow(
             "SELECT share_id FROM calendar_shares WHERE owner_user_id=$1 AND shared_with_email=$2",
             user["user_id"], data.email
@@ -985,7 +1007,7 @@ async def share_calendar(data: CalendarShareCreate, request: Request):
 @api_router.get("/calendar/shares")
 async def list_shares(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         shared_by_me   = _rows(await conn.fetch("SELECT * FROM calendar_shares WHERE owner_user_id=$1",    user["user_id"]))
         shared_with_me = _rows(await conn.fetch("SELECT * FROM calendar_shares WHERE shared_with_email=$1", user["email"]))
     return {"shared_by_me": shared_by_me, "shared_with_me": shared_with_me}
@@ -993,7 +1015,7 @@ async def list_shares(request: Request):
 @api_router.delete("/calendar/shares/{share_id}")
 async def revoke_share(share_id: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         result = await conn.execute(
             "DELETE FROM calendar_shares WHERE share_id=$1 AND owner_user_id=$2", share_id, user["user_id"]
         )
@@ -1004,7 +1026,7 @@ async def revoke_share(share_id: str, request: Request):
 @api_router.get("/calendar/shared/{user_id}/events")
 async def get_shared_events(user_id: str, request: Request):
     viewer = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         share = await conn.fetchrow(
             "SELECT share_id FROM calendar_shares WHERE owner_user_id=$1 AND shared_with_email=$2",
             user_id, viewer["email"]
@@ -1020,7 +1042,7 @@ async def get_upcoming_reminders(request: Request):
     user = await get_current_user(request)
     now = datetime.now(timezone.utc)
     window_end = (now + timedelta(hours=1)).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         events = _rows(await conn.fetch(
             "SELECT * FROM events WHERE user_id=$1 AND reminder IS NOT NULL AND start_time <= $2",
             user["user_id"], window_end
@@ -1050,7 +1072,7 @@ async def create_booking_link(data: RecurringBookingCreate, request: Request):
     user = await get_current_user(request)
     link_id = f"blink_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO booking_links (link_id,user_id,title,duration,recurrence,description,active,created_at) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
@@ -1061,19 +1083,19 @@ async def create_booking_link(data: RecurringBookingCreate, request: Request):
 @api_router.get("/booking-links")
 async def list_booking_links(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         return _rows(await conn.fetch("SELECT * FROM booking_links WHERE user_id=$1", user["user_id"]))
 
 @api_router.delete("/booking-links/{link_id}")
 async def delete_booking_link(link_id: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute("DELETE FROM booking_links WHERE link_id=$1 AND user_id=$2", link_id, user["user_id"])
     return {"message": "Deleted"}
 
 @api_router.get("/booking-links/{link_id}/public")
 async def get_public_booking_link(link_id: str):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         link = _row(await conn.fetchrow("SELECT * FROM booking_links WHERE link_id=$1 AND active=TRUE", link_id))
         if not link:
             raise HTTPException(status_code=404, detail="Booking link not found")
@@ -1088,7 +1110,7 @@ async def create_team(data: TeamCreate, request: Request):
     team_id = f"team_{uuid.uuid4().hex[:12]}"
     members = [{"user_id": user["user_id"], "email": user["email"], "name": user["name"], "role": "admin"}]
     now = datetime.now(timezone.utc).isoformat()
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO teams (team_id,name,owner_id,members,created_at) VALUES ($1,$2,$3,$4,$5)",
             team_id, data.name, user["user_id"], members, now
@@ -1098,7 +1120,7 @@ async def create_team(data: TeamCreate, request: Request):
 @api_router.get("/teams")
 async def list_teams(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM teams WHERE EXISTS ("
             "  SELECT 1 FROM jsonb_array_elements(members) m WHERE m->>'user_id' = $1"
@@ -1109,7 +1131,7 @@ async def list_teams(request: Request):
 @api_router.post("/teams/{team_id}/invite")
 async def invite_to_team(team_id: str, data: TeamInvite, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         team = _row(await conn.fetchrow("SELECT * FROM teams WHERE team_id=$1", team_id))
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -1130,7 +1152,7 @@ async def invite_to_team(team_id: str, data: TeamInvite, request: Request):
 @api_router.delete("/teams/{team_id}/members/{member_email}")
 async def remove_from_team(team_id: str, member_email: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         team = _row(await conn.fetchrow("SELECT * FROM teams WHERE team_id=$1", team_id))
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -1144,7 +1166,7 @@ async def remove_from_team(team_id: str, member_email: str, request: Request):
 @api_router.get("/teams/{team_id}")
 async def get_team(team_id: str, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         team = _row(await conn.fetchrow(
             "SELECT * FROM teams WHERE team_id=$1 AND EXISTS ("
             "  SELECT 1 FROM jsonb_array_elements(members) m WHERE m->>'user_id' = $2"
@@ -1163,7 +1185,7 @@ async def get_plans():
 @api_router.get("/user/plan")
 async def get_user_plan(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         row = _row(await conn.fetchrow("SELECT plan FROM users WHERE user_id=$1", user["user_id"]))
     plan = (row or {}).get("plan", "free")
     return {"plan": plan, "plan_details": SUBSCRIPTION_PLANS.get(plan, SUBSCRIPTION_PLANS["free"])}
@@ -1192,7 +1214,7 @@ class DigestPreference(BaseModel):
 @api_router.get("/user/preferences")
 async def get_user_preferences(request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         prefs = _row(await conn.fetchrow("SELECT * FROM user_preferences WHERE user_id=$1", user["user_id"]))
     if not prefs:
         return {"user_id": user["user_id"], "email_digest": False}
@@ -1201,7 +1223,7 @@ async def get_user_preferences(request: Request):
 @api_router.put("/user/preferences/digest")
 async def update_digest_preference(data: DigestPreference, request: Request):
     user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         await conn.execute(
             "INSERT INTO user_preferences (user_id, email_digest) VALUES ($1,$2) "
             "ON CONFLICT (user_id) DO UPDATE SET email_digest=$2",
@@ -1215,7 +1237,7 @@ async def send_weekly_digest(request: Request):
     if not RESEND_API_KEY:
         raise HTTPException(status_code=400, detail="Email service not configured")
     now = datetime.now(timezone.utc)
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         events = _rows(await conn.fetch(
             "SELECT * FROM events WHERE user_id=$1 AND start_time >= $2",
             user["user_id"], now.isoformat()
@@ -1233,7 +1255,7 @@ async def send_weekly_digest(request: Request):
 
 @app.websocket("/api/ws/{session_token}")
 async def websocket_endpoint(websocket: WebSocket, session_token: str):
-    async with db_pool.acquire() as conn:
+    async with (await get_pool()).acquire() as conn:
         session = _row(await conn.fetchrow(
             "SELECT user_id FROM user_sessions WHERE session_token=$1", session_token
         ))
@@ -1262,28 +1284,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    global db_pool
-    if not DATABASE_URL:
-        logger.error("DATABASE_URL is not set — cannot start server")
-        raise RuntimeError("DATABASE_URL environment variable is required")
-
+    """Best-effort startup init — runs when hosting with uvicorn, skipped on Vercel serverless."""
     try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=10)
-        logger.info("Database pool created")
+        await get_pool()
+        logger.info("Startup: database ready")
     except Exception as e:
-        logger.error(f"Failed to create database pool: {e}")
-        raise
-
-    async with db_pool.acquire() as conn:
-        statements = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
-        for i, stmt in enumerate(statements):
-            try:
-                await conn.execute(stmt)
-            except Exception as e:
-                logger.error(f"Schema statement {i+1} failed: {e}\nStatement: {stmt}")
-                raise
-
-    logger.info("Database schema initialised successfully")
+        logger.error(f"Startup: database init failed (will retry on first request): {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
