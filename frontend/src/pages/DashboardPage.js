@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarMonthView } from "@/components/CalendarMonthView";
 import { CalendarWeekView } from "@/components/CalendarWeekView";
 import { CalendarDayView } from "@/components/CalendarDayView";
+import { DayView } from "@/components/DayView";
 import { EventModal } from "@/components/EventModal";
 import { TaskModal } from "@/components/TaskModal";
 import { TaskSidebar } from "@/components/TaskSidebar";
@@ -46,6 +47,7 @@ export default function DashboardPage() {
   const [calendarView, setCalendarView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
+  const [dayViewDate, setDayViewDate] = useState(null);
   const [showEventModal, setShowEventModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -248,9 +250,7 @@ export default function DashboardPage() {
   };
 
   const handleDayClick = (date) => {
-    setSelectedDate(date);
-    setEditingEvent(null);
-    setShowEventModal(true);
+    setDayViewDate(date);
   };
 
   const handleTimeSlotClick = (date, hour) => {
@@ -263,6 +263,23 @@ export default function DashboardPage() {
 
   const handleEventClick = (event) => {
     setEditingEvent(event);
+    setShowEventModal(true);
+  };
+
+  const handleDayViewEditEvent = (event) => {
+    setDayViewDate(null);
+    setEditingEvent(event);
+    setShowEventModal(true);
+  };
+
+  const handleDayViewDeleteEvent = async (eventId) => {
+    await handleDeleteEvent(eventId);
+  };
+
+  const handleDayViewCreateEvent = () => {
+    setDayViewDate(null);
+    setEditingEvent(null);
+    setSelectedDate(dayViewDate);
     setShowEventModal(true);
   };
 
@@ -422,6 +439,14 @@ export default function DashboardPage() {
         onCreate={handleCreateTask}
         onUpdate={handleUpdateTask}
         onDelete={handleDeleteTask}
+      />
+      <DayView
+        date={dayViewDate}
+        events={events}
+        onClose={() => setDayViewDate(null)}
+        onEditEvent={handleDayViewEditEvent}
+        onDeleteEvent={handleDayViewDeleteEvent}
+        onCreateEvent={handleDayViewCreateEvent}
       />
     </div>
   );
