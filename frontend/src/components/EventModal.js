@@ -19,9 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, X, Search, Users, Repeat, Bell } from "lucide-react";
+import { Trash2, X, Search, Users, Repeat, Bell, Mail, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 const COLORS = [
   { value: "indigo", label: "Indigo", className: "bg-indigo-500" },
@@ -32,14 +33,6 @@ const COLORS = [
   { value: "violet", label: "Violet", className: "bg-violet-500" },
 ];
 
-const MOCK_USERS = [
-  { name: "Sarah Chen", email: "sarah@example.com", avatar: "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940" },
-  { name: "Alex Kim", email: "alex@example.com", avatar: "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85" },
-  { name: "Jordan Lee", email: "jordan@acme.com", avatar: "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDE4NTI4Mnww&ixlib=rb-4.1.0&q=85" },
-  { name: "Morgan Patel", email: "morgan@acme.com", avatar: null },
-  { name: "Taylor Rivera", email: "taylor@example.com", avatar: null },
-];
-
 const STATUS_STYLES = {
   accepted: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
   pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
@@ -47,6 +40,7 @@ const STATUS_STYLES = {
 };
 
 export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpdate, onDelete }) {
+  const { authFetch } = useAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -58,6 +52,35 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [recurrenceType, setRecurrenceType] = useState("none");
   const [recurrenceEnd, setRecurrenceEnd] = useState("");
   const [reminder, setReminder] = useState("none");
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [inviteSent, setInviteSent] = useState(false);
+  const [inviteError, setInviteError] = useState(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
+
+  // Fetch available users from backend (team members + contacts)
+  useEffect(() => {
+    const fetchAvailableUsers = async () => {
+      try {
+        const response = await authFetch("/api/users/available", {
+          method: "GET",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          // Filter out @example.com emails
+          const realUsers = data.filter(u => !u.email.includes("@example.com"));
+          setAvailableUsers(realUsers);
+        }
+      } catch (error) {
+        console.error("Failed to fetch available users:", error);
+        // Fallback: return empty list instead of showing @example.com mocks
+        setAvailableUsers([]);
+      }
+    };
+
+    if (open) {
+      fetchAvailableUsers();
+    }
+  }, [open, authFetch]);
 
   useEffect(() => {
     if (event) {
@@ -70,6 +93,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setRecurrenceType(event.recurrence?.type || "none");
       setRecurrenceEnd(event.recurrence?.end_date ? event.recurrence.end_date.slice(0, 10) : "");
       setReminder(event.reminder ? String(event.reminder) : "none");
+      setInviteSent(false);
+      setInviteError(null);
     } else if (selectedDate) {
       setTitle("");
       setDescription("");
@@ -84,40 +109,93 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       setRecurrenceType("none");
       setRecurrenceEnd("");
       setReminder("none");
+      setInviteSent(false);
+      setInviteError(null);
     }
     setSearchQuery("");
     setShowSearch(false);
   }, [event, selectedDate, open]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!title.trim() || !startTime || !endTime) return;
-    const recurrence = recurrenceType !== "none"
-      ? { type: recurrenceType, end_date: recurrenceEnd ? new Date(recurrenceEnd).toISOString() : null }
-      : null;
-    const data = {
-      title: title.trim(),
-      description,
-      start_time: new Date(startTime).toISOString(),
-      end_time: new Date(endTime).toISOString(),
-      color,
-      attendees,
-      recurrence,
-      reminder: reminder !== "none" ? parseInt(reminder) : null,
-    };
-    const targetId = event?.original_event_id || event?.event_id;
-    if (event) {
-      onUpdate(targetId, data);
-    } else {
-      onCreate(data);
+
+    setInviteLoading(true);
+    setInviteError(null);
+    setInviteSent(false);
+
+    try {
+      const recurrence = recurrenceType !== "none"
+        ? { type: recurrenceType, end_date: recurrenceEnd ? new Date(recurrenceEnd).toISOString() : null }
+        : null;
+      
+      const data = {
+        title: title.trim(),
+        description,
+        start_time: new Date(startTime).toISOString(),
+        end_time: new Date(endTime).toISOString(),
+        color,
+        attendees,
+        recurrence,
+        reminder: reminder !== "none" ? parseInt(reminder) : null,
+      };
+
+      const targetId = event?.original_event_id || event?.event_id;
+      
+      if (event) {
+        onUpdate(targetId, data);
+      } else {
+        const result = onCreate(data);
+        
+        // After event is created, send invites to all attendees
+        if (attendees.length > 0 && result) {
+          const eventId = result.event_id || targetId;
+          
+          for (const attendee of attendees) {
+            try {
+              const inviteResponse = await authFetch(`/api/events/${eventId}/invite`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  guest_email: attendee.email,
+                  guest_name: attendee.name,
+                }),
+              });
+
+              if (!inviteResponse.ok) {
+                console.error(`Failed to send invite to ${attendee.email}`);
+                setInviteError(`Failed to send email to ${attendee.email}`);
+              }
+            } catch (err) {
+              console.error(`Error sending invite to ${attendee.email}:`, err);
+              setInviteError(`Error sending email to ${attendee.email}`);
+            }
+          }
+
+          if (!inviteError) {
+            setInviteSent(true);
+            setTimeout(() => {
+              setInviteSent(false);
+            }, 4000);
+          }
+        }
+      }
+
+      onClose();
+    } catch (error) {
+      console.error("Error saving event:", error);
+      setInviteError("Failed to save event");
+    } finally {
+      setInviteLoading(false);
     }
-    onClose();
   };
 
   const addAttendee = (user) => {
-    setAttendees((prev) => [
-      ...prev,
-      { name: user.name, email: user.email, avatar: user.avatar, status: "pending" },
-    ]);
+    if (!attendees.find(a => a.email === user.email)) {
+      setAttendees((prev) => [
+        ...prev,
+        { name: user.name, email: user.email, avatar: user.avatar, status: "pending" },
+      ]);
+    }
     setSearchQuery("");
     setShowSearch(false);
   };
@@ -126,22 +204,49 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
     setAttendees((prev) => prev.filter((a) => a.email !== email));
   };
 
-  const filteredUsers = MOCK_USERS.filter(
+  const filteredUsers = availableUsers.filter(
     (u) =>
       (u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.email.toLowerCase().includes(searchQuery.toLowerCase())) &&
       !attendees.find((a) => a.email === u.email)
   );
 
+  const isSharedEvent = attendees.length > 0;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" data-testid="event-modal">
         <DialogHeader>
-          <DialogTitle>{event ? "Edit Event" : "Create Event"}</DialogTitle>
+          <div className="flex items-center gap-2">
+            <DialogTitle>{event ? "Edit Event" : "Create Event"}</DialogTitle>
+            {isSharedEvent && (
+              <Badge variant="outline" className="ml-auto">
+                <Users className="h-3 w-3 mr-1" />
+                Shared Event
+              </Badge>
+            )}
+          </div>
           <DialogDescription>
             {event ? "Update event details" : "Add a new event to your calendar"}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Invite Feedback Messages */}
+        {inviteSent && (
+          <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+            <Mail className="h-4 w-4" />
+            <span className="text-sm">
+              ✓ Emails sent to {attendees.length} {attendees.length === 1 ? "person" : "people"}
+            </span>
+          </div>
+        )}
+
+        {inviteError && (
+          <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg p-3 flex items-center gap-2 text-rose-700 dark:text-rose-300">
+            <AlertCircle className="h-4 w-4" />
+            <span className="text-sm">{inviteError}</span>
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="space-y-2">
@@ -263,7 +368,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                     >
                       <Avatar className="h-7 w-7">
                         <AvatarImage src={user.avatar} className="object-cover" />
-                        <AvatarFallback className="text-xs">{user.name[0]}</AvatarFallback>
+                        <AvatarFallback className="text-xs">{user.name?.[0] || "?"}</AvatarFallback>
                       </Avatar>
                       <div>
                         <div className="text-sm font-medium">{user.name}</div>
@@ -271,6 +376,11 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {showSearch && searchQuery && filteredUsers.length === 0 && (
+                <div className="absolute top-full left-0 right-0 bg-popover border border-border rounded-lg shadow-lg mt-1 z-20 p-3 text-center text-xs text-muted-foreground">
+                  No users found. Email will still be sent to this address.
                 </div>
               )}
             </div>
@@ -361,8 +471,23 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
             <Button data-testid="event-cancel-btn" variant="outline" size="sm" onClick={onClose}>
               Cancel
             </Button>
-            <Button data-testid="event-save-btn" size="sm" onClick={handleSubmit} disabled={!title.trim()}>
-              {event ? "Update" : "Create"} Event
+            <Button
+              data-testid="event-save-btn"
+              size="sm"
+              onClick={handleSubmit}
+              disabled={!title.trim() || inviteLoading}
+              className="relative"
+            >
+              {inviteLoading ? (
+                <>
+                  <span className="opacity-0">{event ? "Update" : "Create"} Event</span>
+                  <span className="absolute inset-0 flex items-center justify-center">
+                    <span className="animate-spin">⏳</span>
+                  </span>
+                </>
+              ) : (
+                `${event ? "Update" : "Create"} Event`
+              )}
             </Button>
           </div>
         </DialogFooter>

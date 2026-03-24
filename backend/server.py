@@ -414,7 +414,7 @@ async def create_session(user_id: str, response: Response) -> str:
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-# ── Auth Endpoints ───────────────────────────────────────────────────────────
+# ── Users ──────────────────────────────────────────────────────────────────────\n\n@api_router.get(\"/users/available\")\nasync def get_available_users(request: Request):\n    \"\"\"Get all real users (excluding @example.com placeholders) for inviting to events.\n    Returns: user list with name, email, avatar\"\"\"\n    user = await get_current_user(request)\n    async with (await get_pool()).acquire() as conn:\n        # Get all users except those with @example.com emails and yourself\n        rows = await conn.fetch(\n            \"SELECT user_id, name, email, picture FROM users \"\n            \"WHERE email NOT LIKE '%@example.com' AND user_id != $1 \"\n            \"ORDER BY name ASC\",\n            user[\"user_id\"]\n        )\n    return _rows(rows)\n\n# ── Auth Endpoints ───────────────────────────────────────────────────────────
 
 @api_router.post("/auth/register")
 async def register(data: UserRegister, response: Response):
