@@ -19,7 +19,6 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 
 ROOT_DIR = Path(__file__).parent
 env_path = ROOT_DIR / '.env'
@@ -31,6 +30,26 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ── Environment Variables ────────────────────────────────────────────────────
+
+RESEND_API_KEY      = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL        = os.environ.get('SENDER_EMAIL', 'noreply@planora.app')
+GOOGLE_CLIENT_ID    = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GCAL_REDIRECT_URI   = os.environ.get('GCAL_REDIRECT_URI', '')
+GCAL_SCOPES         = ['https://www.googleapis.com/auth/calendar']
+STRIPE_API_KEY      = os.environ.get('STRIPE_API_KEY', '')
+BACKEND_EXTERNAL_URL = os.environ.get('BACKEND_EXTERNAL_URL', '')
+
+SUBSCRIPTION_PLANS = {
+    'free':  {'name': 'Free',  'amount': 0,    'features': ['5 events/month', '1 booking link']},
+    'pro':   {'name': 'Pro',   'amount': 999,  'features': ['Unlimited events', '10 booking links', 'Analytics']},
+    'team':  {'name': 'Team',  'amount': 2999, 'features': ['Everything in Pro', 'Team collaboration', 'Priority support']},
+}
+
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 # ── Database ────────────────────────────────────────────────────────────────
 
@@ -179,10 +198,6 @@ def _rows(rows) -> list:
     return [dict(r) for r in rows]
 
 def _build_update(fields: dict, start_idx: int = 2):
-    """
-    Returns (set_clause_str, values_list) for a partial UPDATE.
-    Caller supplies the first placeholder ($1) as the WHERE key.
-    """
     clauses, values = [], []
     for k, v in fields.items():
         values.append(v)
@@ -666,19 +681,7 @@ async def create_booking(data: BookingCreate):
                 "from": f"Planora <{SENDER_EMAIL}>",
                 "to": [data.guest_email],
                 "subject": f"Meeting Confirmed with {host_name}",
-                "html": f"""<div style="font-family:'DM Sans',Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8f8fc;border-radius:16px">
-                    <div style="background:#1e1b4b;color:#fff;padding:28px;border-radius:12px;margin-bottom:20px">
-                        <h1 style="font-family:'Manrope',sans-serif;margin:0 0 8px;font-size:22px">Meeting Confirmed</h1>
-                        <p style="color:#a5b4fc;margin:0;font-size:14px">Your meeting has been booked</p>
-                    </div>
-                    <div style="background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb">
-                        <p style="margin:0 0 16px;font-size:15px"><strong>With:</strong> {host_name}</p>
-                        <p style="margin:0 0 16px;font-size:15px"><strong>When:</strong> {formatted_time}</p>
-                        <p style="margin:0 0 16px;font-size:15px"><strong>Duration:</strong> {data.duration or 30} minutes</p>
-                        <p style="margin:0;font-size:13px;color:#6b7280">Booked as {data.guest_name} ({data.guest_email})</p>
-                    </div>
-                    <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:20px">Powered by Planora</p>
-                </div>"""
+                "html": f"<p>Your meeting with {host_name} is confirmed for {formatted_time}.</p>"
             })
         except Exception as e:
             logger.error(f"Failed to send booking email: {e}")
@@ -698,13 +701,11 @@ async def list_bookings(request: Request):
 async def seed_data(request: Request):
     user = await get_current_user(request)
     async with db_pool.acquire() as conn:
-        existing = await conn.fetchrow("SELECT user_id FROM availability WHERE user_id=$1", user["user_id"])
-        if not existing:
-            await conn.execute(
-                "INSERT INTO availability (user_id, schedule, slot_duration, updated_at) VALUES ($1,$2,$3,$4) "
-                "ON CONFLICT (user_id) DO NOTHING",
-                user["user_id"], DEFAULT_SCHEDULE, 30, datetime.now(timezone.utc).isoformat()
-            )
+        await conn.execute(
+            "INSERT INTO availability (user_id, schedule, slot_duration, updated_at) VALUES ($1,$2,$3,$4) "
+            "ON CONFLICT (user_id) DO NOTHING",
+            user["user_id"], DEFAULT_SCHEDULE, 30, datetime.now(timezone.utc).isoformat()
+        )
     return {"message": "ok"}
 
 # ── Google Calendar ───────────────────────────────────────────────────────────
@@ -742,7 +743,7 @@ async def gcal_callback(code: str, state: str, response: Response):
                                token_data, state)
     except Exception as e:
         logger.error(f"Google Calendar callback error: {e}")
-    frontend_url = BACKEND_EXTERNAL_URL.replace('/api', '').rstrip('/')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://planora-tau-seven.vercel.app')
     return RedirectResponse(url=f"{frontend_url}/settings?gcal=connected")
 
 @api_router.get("/gcal/status")
@@ -1153,7 +1154,7 @@ async def get_team(team_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Team not found or no access")
     return team
 
-# ── Plans & Stripe ────────────────────────────────────────────────────────────
+# ── Plans (Stripe removed — use emergentintegrations separately if needed) ────
 
 @api_router.get("/plans")
 async def get_plans():
@@ -1173,90 +1174,14 @@ class SubscriptionCheckout(BaseModel):
 
 @api_router.post("/subscribe")
 async def create_subscription(data: SubscriptionCheckout, request: Request):
-    user = await get_current_user(request)
-    if data.plan_id not in SUBSCRIPTION_PLANS or data.plan_id == "free":
-        raise HTTPException(status_code=400, detail="Invalid plan")
-    plan   = SUBSCRIPTION_PLANS[data.plan_id]
-    amount = plan["amount"]
-    host_url    = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    success_url = f"{data.origin_url}/settings?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url  = f"{data.origin_url}/settings?payment=cancelled"
-    metadata = {"user_id": user["user_id"], "plan_id": data.plan_id, "user_email": user["email"]}
-    checkout_request = CheckoutSessionRequest(amount=amount, currency="usd",
-                                              success_url=success_url, cancel_url=cancel_url,
-                                              metadata=metadata)
-    session = await stripe_checkout.create_checkout_session(checkout_request)
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO payment_transactions (session_id,user_id,plan_id,amount,currency,metadata,payment_status,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-            session.session_id, user["user_id"], data.plan_id, amount, "usd", metadata, "initiated",
-            datetime.now(timezone.utc).isoformat()
-        )
-    return {"url": session.url, "session_id": session.session_id}
+    raise HTTPException(status_code=503, detail="Payment processing not configured on this deployment")
 
 @api_router.get("/subscribe/status/{session_id}")
 async def check_subscription_status(session_id: str, request: Request):
-    user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
-        txn = _row(await conn.fetchrow(
-            "SELECT * FROM payment_transactions WHERE session_id=$1 AND user_id=$2",
-            session_id, user["user_id"]
-        ))
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    if txn.get("payment_status") == "paid":
-        return {"status": "paid", "plan_id": txn["plan_id"]}
-
-    host_url    = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    status = await stripe_checkout.get_checkout_status(session_id)
-    now    = datetime.now(timezone.utc).isoformat()
-
-    if status.payment_status == "paid":
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE payment_transactions SET payment_status='paid', status=$1, paid_at=$2 WHERE session_id=$3",
-                status.status, now, session_id
-            )
-            await conn.execute("UPDATE users SET plan=$1 WHERE user_id=$2", txn["plan_id"], user["user_id"])
-        return {"status": "paid", "plan_id": txn["plan_id"]}
-
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE payment_transactions SET payment_status=$1, status=$2 WHERE session_id=$3",
-            status.payment_status, status.status, session_id
-        )
-    return {"status": status.status, "payment_status": status.payment_status, "plan_id": txn["plan_id"]}
+    raise HTTPException(status_code=503, detail="Payment processing not configured on this deployment")
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    body = await request.body()
-    sig  = request.headers.get("Stripe-Signature", "")
-    try:
-        host_url    = str(request.base_url).rstrip("/")
-        webhook_url = f"{host_url}api/webhook/stripe"
-        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-        event = await stripe_checkout.handle_webhook(body, sig)
-        if event.payment_status == "paid" and event.session_id:
-            async with db_pool.acquire() as conn:
-                txn = _row(await conn.fetchrow(
-                    "SELECT * FROM payment_transactions WHERE session_id=$1 AND payment_status != 'paid'",
-                    event.session_id
-                ))
-                if txn:
-                    now = datetime.now(timezone.utc).isoformat()
-                    await conn.execute(
-                        "UPDATE payment_transactions SET payment_status='paid', status='complete', paid_at=$1 WHERE session_id=$2",
-                        now, event.session_id
-                    )
-                    await conn.execute("UPDATE users SET plan=$1 WHERE user_id=$2",
-                                       txn["plan_id"], txn["user_id"])
-    except Exception as e:
-        logger.error(f"Stripe webhook error: {e}")
     return {"received": True}
 
 # ── User Preferences & Digest ─────────────────────────────────────────────────
@@ -1287,66 +1212,21 @@ async def update_digest_preference(data: DigestPreference, request: Request):
 @api_router.post("/digest/send")
 async def send_weekly_digest(request: Request):
     user = await get_current_user(request)
-    now        = datetime.now(timezone.utc)
-    week_start = (now - timedelta(days=7)).isoformat()
-    week_end   = (now + timedelta(days=7)).isoformat()
-
-    async with db_pool.acquire() as conn:
-        events = _rows(await conn.fetch(
-            "SELECT * FROM events WHERE user_id=$1 AND start_time >= $2 AND start_time <= $3",
-            user["user_id"], week_start, week_end
-        ))
-        tasks = _rows(await conn.fetch("SELECT * FROM tasks WHERE user_id=$1", user["user_id"]))
-
-    pending_tasks      = [t for t in tasks if not t.get("completed")]
-    completed_this_week = [t for t in tasks if t.get("completed")]
-    upcoming_events    = [e for e in events if str(e.get("start_time","")) >= now.isoformat()]
-
-    events_html = ""
-    for e in upcoming_events[:10]:
-        try:
-            dt = datetime.fromisoformat(str(e["start_time"]).replace("Z","+00:00"))
-            events_html += f'<li style="margin-bottom:8px;font-size:14px"><strong>{e["title"]}</strong> &mdash; {dt.strftime("%a, %b %d at %I:%M %p")}</li>'
-        except Exception:
-            events_html += f'<li style="margin-bottom:8px;font-size:14px"><strong>{e["title"]}</strong></li>'
-
-    tasks_html = "".join(f'<li style="margin-bottom:6px;font-size:14px">{t["title"]}</li>' for t in pending_tasks[:10])
-
-    html = f"""<div style="font-family:'DM Sans',Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:32px;background:#f8f8fc;border-radius:16px">
-        <div style="background:#1e1b4b;color:#fff;padding:28px;border-radius:12px;margin-bottom:20px">
-            <h1 style="font-family:'Manrope',sans-serif;margin:0 0 6px;font-size:22px">Your Weekly Digest</h1>
-            <p style="color:#a5b4fc;margin:0;font-size:13px">{now.strftime('%b %d')} &mdash; {(now+timedelta(days=7)).strftime('%b %d, %Y')}</p>
-        </div>
-        <div style="background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:16px">
-            <h2 style="font-size:16px;margin:0 0 12px;color:#1e1b4b">This Week at a Glance</h2>
-            <div style="display:flex;gap:16px;margin-bottom:16px">
-                <div style="flex:1;text-align:center;padding:12px;background:#f1f0ff;border-radius:8px">
-                    <div style="font-size:24px;font-weight:700;color:#4338ca">{len(upcoming_events)}</div>
-                    <div style="font-size:12px;color:#6b7280">Upcoming</div>
-                </div>
-                <div style="flex:1;text-align:center;padding:12px;background:#ecfdf5;border-radius:8px">
-                    <div style="font-size:24px;font-weight:700;color:#059669">{len(completed_this_week)}</div>
-                    <div style="font-size:12px;color:#6b7280">Completed</div>
-                </div>
-                <div style="flex:1;text-align:center;padding:12px;background:#fef2f2;border-radius:8px">
-                    <div style="font-size:24px;font-weight:700;color:#dc2626">{len(pending_tasks)}</div>
-                    <div style="font-size:12px;color:#6b7280">Pending</div>
-                </div>
-            </div>
-        </div>
-        {"<div style='background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:16px'><h3 style='font-size:15px;margin:0 0 12px;color:#1e1b4b'>Upcoming Events</h3><ul style='list-style:none;padding:0;margin:0'>" + events_html + "</ul></div>" if events_html else ""}
-        {"<div style='background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb'><h3 style='font-size:15px;margin:0 0 12px;color:#1e1b4b'>Pending Tasks</h3><ul style='list-style:none;padding:0;margin:0'>" + tasks_html + "</ul></div>" if tasks_html else ""}
-        <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:20px">Powered by Planora</p>
-    </div>"""
-
     if not RESEND_API_KEY:
         raise HTTPException(status_code=400, detail="Email service not configured")
+    now = datetime.now(timezone.utc)
+    async with db_pool.acquire() as conn:
+        events = _rows(await conn.fetch(
+            "SELECT * FROM events WHERE user_id=$1 AND start_time >= $2",
+            user["user_id"], now.isoformat()
+        ))
+        tasks = _rows(await conn.fetch("SELECT * FROM tasks WHERE user_id=$1", user["user_id"]))
     try:
         resend.Emails.send({"from": f"Planora <{SENDER_EMAIL}>", "to": [user["email"]],
-                            "subject": f"Your Planora Weekly Digest - {now.strftime('%b %d')}", "html": html})
+                            "subject": f"Your Planora Weekly Digest - {now.strftime('%b %d')}",
+                            "html": f"<p>You have {len(events)} upcoming events and {len([t for t in tasks if not t.get('completed')])} pending tasks.</p>"})
         return {"message": "Digest sent", "email": user["email"]}
     except Exception as e:
-        logger.error(f"Digest email error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -1386,26 +1266,24 @@ async def startup():
     if not DATABASE_URL:
         logger.error("DATABASE_URL is not set — cannot start server")
         raise RuntimeError("DATABASE_URL environment variable is required")
-    
+
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=10)
         logger.info("Database pool created")
     except Exception as e:
         logger.error(f"Failed to create database pool: {e}")
         raise
-    
-    # Execute schema statements individually
+
     async with db_pool.acquire() as conn:
         statements = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
         for i, stmt in enumerate(statements):
             try:
                 await conn.execute(stmt)
-                logger.debug(f"Executed schema statement {i+1}/{len(statements)}")
             except Exception as e:
-                logger.error(f"Schema initialization failed at statement {i+1}: {e}\nStatement: {stmt}")
+                logger.error(f"Schema statement {i+1} failed: {e}\nStatement: {stmt}")
                 raise
-    
-    logger.info("Database pool created and schema initialised successfully")
+
+    logger.info("Database schema initialised successfully")
 
 @app.on_event("shutdown")
 async def shutdown():
