@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, authFetch } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,13 +59,14 @@ export function OnboardingWizard({ onComplete }) {
   const saveAvailability = async () => {
     setSaving(true);
     try {
-      await fetch(`${API_URL}/api/availability`, {
+      const res = await authFetch(`${API_URL}/api/availability`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ schedule, slot_duration: slotDuration }),
       });
-      toast.success("Availability saved!");
+      if (res.ok) {
+        toast.success("Availability saved!");
+      }
       setStep(1);
     } catch (e) {
       toast.error("Failed to save");
@@ -80,10 +81,9 @@ export function OnboardingWizard({ onComplete }) {
     }
     setSaving(true);
     try {
-      await fetch(`${API_URL}/api/events`, {
+      const res = await authFetch(`${API_URL}/api/events`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           title: eventTitle.trim(),
           start_time: new Date(eventDate).toISOString(),
@@ -91,7 +91,11 @@ export function OnboardingWizard({ onComplete }) {
           color: "indigo",
         }),
       });
-      toast.success("Event created!");
+      if (res.ok) {
+        toast.success("Event created!");
+      } else {
+        toast.error("Failed to create event");
+      }
       setStep(2);
     } catch (e) {
       toast.error("Failed to create event");
