@@ -11,16 +11,17 @@ export function DayView({
   onDeleteEvent,
   onCreateEvent,
 }) {
-  if (!date) return null;
-
-  // Handle escape key to close modal
+  // Handle escape key to close modal (must be before early return)
   useEffect(() => {
+    if (!date) return; // Skip effect if no date
     const handleKeyDown = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, date]);
+
+  if (!date) return null;
 
   // Format the date nicely
   const formattedDate = date.toLocaleDateString("en-US", {
