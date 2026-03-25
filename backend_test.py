@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import uuid
 
 class PlanoraTester:
-    def __init__(self, base_url="https://availability-hub-22.preview.emergentagent.com"):
+    def __init__(self, base_url="https://collab-planner-12.preview.emergentagent.com"):
         self.base_url = base_url
         self.session_token = None
         self.user_id = None

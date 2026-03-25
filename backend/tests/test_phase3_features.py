@@ -9,7 +9,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://availability-hub-22.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://collab-planner-12.preview.emergentagent.com')
 SESSION_TOKEN = "sess_41114b878c1c49ed8ea66640c3c09109"
 USER_ID = "user_d1396a53e00d"
 
