@@ -8,6 +8,7 @@ import { Plus, Clock, CalendarDays, Trash2, ClipboardList, CalendarCheck } from 
 import { format, parseISO, isBefore, isToday, isTomorrow, isValid } from "date-fns";
 import { EmptyState } from "@/components/EmptyState";
 
+
 const EVENT_DOT_COLORS = {
   indigo: "bg-indigo-500",
   emerald: "bg-emerald-500",
