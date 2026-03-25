@@ -7,7 +7,7 @@ Modern scheduling/calendar/task planner combining Calendly + Google Calendar + c
 - **Frontend**: React + Tailwind CSS + Shadcn/UI
 - **Backend**: FastAPI (Python), Vercel Serverless Functions via `api/index.py`
 - **Database**: NeonDB (PostgreSQL via asyncpg)
-- **Deployment**: Vercel (frontend + backend together)
+- **Deployment**: Vercel (frontend + backend together), Python 3.12 pinned via `.python-version`
 
 ## Environment Variables (Vercel)
 - DATABASE_URL, RESEND_API_KEY, SENDER_EMAIL, FRONTEND_URL, REACT_APP_BACKEND_URL
@@ -16,6 +16,7 @@ Modern scheduling/calendar/task planner combining Calendly + Google Calendar + c
 ## Core Features (Implemented)
 - User auth (email + Google OAuth) with token persistence (localStorage + Bearer header)
 - Calendar views: Month, Week, Day, Kanban
+- Day-click modal: click any day to see all events with edit/delete/create actions
 - Event CRUD with colors, recurrence, reminders, attendees, team_id
 - Multi-day event spanning across calendar cells
 - Task management with categories and Kanban view
@@ -37,7 +38,8 @@ Modern scheduling/calendar/task planner combining Calendly + Google Calendar + c
 3. GET /api/events: Now returns team events user belongs to
 4. Removed `emergentintegrations` dependency (breaks Vercel build)
 5. Added missing config variables (RESEND, Google, etc.)
-6. Cleaned requirements.txt for Vercel compatibility
+6. Vercel Python 3.12 pin: Added `.python-version` file to fix asyncpg C extension compilation error on Python 3.14
+7. DayView: Fixed color mapping, passed `displayEvents` instead of raw `events`
 
 ## Backlog
 - P2: Drag to resize events in week/day views

@@ -444,7 +444,7 @@ export default function DashboardPage() {
       />
       <DayView
         date={dayViewDate}
-        events={events}
+        events={displayEvents}
         onClose={() => setDayViewDate(null)}
         onEditEvent={handleDayViewEditEvent}
         onDeleteEvent={handleDayViewDeleteEvent}

@@ -1,272 +1,160 @@
 import { useEffect } from "react";
-import { parseISO, format, isToday } from "date-fns";
-import { X, Edit2, Trash2, Plus } from "lucide-react";
+import { parseISO, format, isToday, isSameDay } from "date-fns";
+import { X, Edit2, Trash2, Plus, Clock, Users, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
-export function DayView({
-  date,
-  events = [],
-  onClose,
-  onEditEvent,
-  onDeleteEvent,
-  onCreateEvent,
-}) {
-  // Handle escape key to close modal (must be before early return)
+const COLOR_MAP = {
+  indigo:  { border: "#6366f1", bg: "bg-indigo-50 dark:bg-indigo-950/30",  text: "text-indigo-700 dark:text-indigo-300" },
+  emerald: { border: "#10b981", bg: "bg-emerald-50 dark:bg-emerald-950/30", text: "text-emerald-700 dark:text-emerald-300" },
+  amber:   { border: "#f59e0b", bg: "bg-amber-50 dark:bg-amber-950/30",   text: "text-amber-700 dark:text-amber-300" },
+  sky:     { border: "#0ea5e9", bg: "bg-sky-50 dark:bg-sky-950/30",       text: "text-sky-700 dark:text-sky-300" },
+  rose:    { border: "#f43f5e", bg: "bg-rose-50 dark:bg-rose-950/30",     text: "text-rose-700 dark:text-rose-300" },
+  violet:  { border: "#8b5cf6", bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-300" },
+  red:     { border: "#ef4444", bg: "bg-red-50 dark:bg-red-950/30",       text: "text-red-700 dark:text-red-300" },
+  blue:    { border: "#3b82f6", bg: "bg-blue-50 dark:bg-blue-950/30",     text: "text-blue-700 dark:text-blue-300" },
+  green:   { border: "#22c55e", bg: "bg-green-50 dark:bg-green-950/30",   text: "text-green-700 dark:text-green-300" },
+};
+
+const DEFAULT_COLOR = COLOR_MAP.indigo;
+
+export function DayView({ date, events = [], onClose, onEditEvent, onDeleteEvent, onCreateEvent }) {
   useEffect(() => {
-    if (!date) return; // Skip effect if no date
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
+    if (!date) return;
+    const handleKeyDown = (e) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, date]);
 
   if (!date) return null;
 
-  // Format the date nicely
-  const formattedDate = date.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  // Filter and sort events for this day chronologically
   const dayEvents = events
     .filter((event) => {
-      const eventDate = parseISO(event.start_time);
-      return (
-        eventDate.getFullYear() === date.getFullYear() &&
-        eventDate.getMonth() === date.getMonth() &&
-        eventDate.getDate() === date.getDate()
-      );
+      if (!event.start_time) return false;
+      return isSameDay(parseISO(event.start_time), date);
     })
-    .sort((a, b) => {
-      const timeA = parseISO(a.start_time).getTime();
-      const timeB = parseISO(b.start_time).getTime();
-      return timeA - timeB;
-    });
+    .sort((a, b) => parseISO(a.start_time).getTime() - parseISO(b.start_time).getTime());
 
-  // Helper to format time range
   const formatTimeRange = (startTime, endTime) => {
-    const start = parseISO(startTime);
-    const end = parseISO(endTime);
-    const startStr = format(start, "h:mm a");
-    const endStr = format(end, "h:mm a");
-    return `${startStr} - ${endStr}`;
+    return `${format(parseISO(startTime), "h:mm a")} – ${format(parseISO(endTime), "h:mm a")}`;
   };
 
-  // Helper to calculate duration
-  const calculateDuration = (startTime, endTime) => {
-    const start = parseISO(startTime);
-    const end = parseISO(endTime);
-    const minutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-
-    if (hours === 0) return `${mins} min`;
-    if (mins === 0) return `${hours} hour${hours > 1 ? "s" : ""}`;
-    return `${hours}h ${mins}m`;
+  const getDuration = (startTime, endTime) => {
+    const mins = Math.floor((parseISO(endTime) - parseISO(startTime)) / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return `${m}min`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
   };
 
-  // Helper to get initials from attendee name
-  const getAttendeeDisplay = (attendees = []) => {
-    if (!attendees || attendees.length === 0) return null;
-    if (attendees.length <= 2) {
-      return attendees.map((a) => a.name || a.email).join(", ");
-    }
-    const shown = attendees.slice(0, 2).map((a) => a.name || a.email).join(", ");
-    return `${shown} +${attendees.length - 2} more`;
-  };
-
-  // Helper to get event color
-  const getEventColor = (color) => {
-    const colors = {
-      red: "bg-red-100 border-red-300 text-red-900",
-      blue: "bg-blue-100 border-blue-300 text-blue-900",
-      green: "bg-green-100 border-green-300 text-green-900",
-      yellow: "bg-yellow-100 border-yellow-300 text-yellow-900",
-      purple: "bg-purple-100 border-purple-300 text-purple-900",
-      pink: "bg-pink-100 border-pink-300 text-pink-900",
-      indigo: "bg-indigo-100 border-indigo-300 text-indigo-900",
-      cyan: "bg-cyan-100 border-cyan-300 text-cyan-900",
-    };
-    return colors[color] || colors.blue;
-  };
-
-  const getColorIndicator = (color) => {
-    const colors = {
-      red: "bg-red-500",
-      blue: "bg-blue-500",
-      green: "bg-green-500",
-      yellow: "bg-yellow-500",
-      purple: "bg-purple-500",
-      pink: "bg-pink-500",
-      indigo: "bg-indigo-500",
-      cyan: "bg-cyan-500",
-    };
-    return colors[color] || colors.blue;
-  };
+  const c = (color) => COLOR_MAP[color] || DEFAULT_COLOR;
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 animate-in fade-in-0 duration-200" onClick={onClose} data-testid="day-view-backdrop" />
 
-      {/* Modal */}
-      <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[80vh] bg-background border border-border rounded-lg shadow-lg overflow-hidden">
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-lg max-h-[85vh] bg-background border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-200" data-testid="day-view-modal">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card sticky top-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
-            <h2 className="text-xl font-bold tracking-tight">
-              {isToday(date) ? "Today - " : ""}{formattedDate}
+            <h2 className="text-lg font-bold tracking-tight" data-testid="day-view-title">
+              {isToday(date) && <span className="text-primary mr-1.5">Today</span>}
+              {format(date, "EEEE, MMMM d")}
             </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              {dayEvents.length} event{dayEvents.length !== 1 ? "s" : ""} scheduled
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {dayEvents.length} event{dayEvents.length !== 1 ? "s" : ""}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-accent rounded-md transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} data-testid="day-view-close-btn">
+            <X className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(80vh-120px)]">
+        <ScrollArea className="max-h-[calc(85vh-130px)]">
           {dayEvents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-6">
-              <div className="text-muted-foreground text-center mb-4">
-                <p className="text-lg font-medium mb-2">No events scheduled</p>
-                <p className="text-sm">
-                  {isToday(date)
-                    ? "Create your first event for today"
-                    : "Create an event for this day"}
-                </p>
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center" data-testid="day-view-empty">
+              <div className="h-12 w-12 rounded-xl bg-muted/50 flex items-center justify-center mb-4">
+                <Clock className="h-5 w-5 text-muted-foreground" />
               </div>
-              <Button
-                size="sm"
-                onClick={() =>
-                  onCreateEvent?.({ date: new Date(date), time: "09:00" })
-                }
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                New Event
+              <p className="text-sm font-medium mb-1">No events scheduled</p>
+              <p className="text-xs text-muted-foreground mb-4">
+                {isToday(date) ? "Your day is free — add something!" : "Nothing planned for this day yet."}
+              </p>
+              <Button size="sm" onClick={() => onCreateEvent?.()} data-testid="day-view-create-btn">
+                <Plus className="h-3.5 w-3.5 mr-1" /> New Event
               </Button>
             </div>
           ) : (
-            <div className="divide-y divide-border">
-              {dayEvents.map((event) => (
-                <div
-                  key={event.event_id}
-                  className={`p-4 sm:p-6 border-l-4 transition-colors hover:bg-accent/50 ${getColorIndicator(
-                    event.color
-                  )} border-l-${event.color}-500`}
-                  style={{ borderLeftColor: event.color || "#3b82f6" }}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-semibold text-foreground mb-2 break-words">
-                        {event.title}
-                      </h3>
-
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <span className="font-medium">
-                            {formatTimeRange(
-                              event.start_time,
-                              event.end_time
-                            )}
-                          </span>
-                          <span className="text-xs">
-                            ({calculateDuration(event.start_time, event.end_time)})
-                          </span>
+            <div className="p-3 space-y-2">
+              {dayEvents.map((event) => {
+                const color = c(event.color);
+                return (
+                  <div
+                    key={event.event_id}
+                    data-testid={`day-view-event-${event.event_id}`}
+                    className={cn("rounded-xl border-l-[3px] p-4 transition-colors hover:bg-accent/30", color.bg)}
+                    style={{ borderLeftColor: color.border }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className={cn("font-semibold text-sm mb-1.5 break-words", color.text)}>
+                          {event.title}
+                        </h3>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          <span>{formatTimeRange(event.start_time, event.end_time)}</span>
+                          <span className="text-[10px] opacity-60">({getDuration(event.start_time, event.end_time)})</span>
                         </div>
 
-                        {event.attendees && event.attendees.length > 0 && (
-                          <div className="flex items-start gap-2">
-                            <span className="text-muted-foreground flex-shrink-0">
-                              Attendees:
-                            </span>
-                            <span className="text-foreground break-words">
-                              {getAttendeeDisplay(event.attendees)}
-                            </span>
-                          </div>
-                        )}
-
-                        {event.location && (
-                          <div className="flex items-start gap-2">
-                            <span className="text-muted-foreground flex-shrink-0">
-                              Location:
-                            </span>
-                            <span className="text-foreground break-words">
-                              {event.location}
+                        {event.attendees?.length > 0 && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+                            <Users className="h-3 w-3 shrink-0" />
+                            <span className="truncate">
+                              {event.attendees.length <= 2
+                                ? event.attendees.map((a) => a.name || a.email).join(", ")
+                                : `${event.attendees.slice(0, 2).map((a) => a.name || a.email).join(", ")} +${event.attendees.length - 2}`}
                             </span>
                           </div>
                         )}
 
                         {event.description && (
-                          <div className="flex items-start gap-2 pt-2">
-                            <span className="text-muted-foreground flex-shrink-0">
-                              Notes:
-                            </span>
-                            <span className="text-foreground break-words line-clamp-2">
-                              {event.description}
-                            </span>
+                          <div className="flex items-start gap-1.5 text-xs text-muted-foreground mt-1.5">
+                            <FileText className="h-3 w-3 shrink-0 mt-0.5" />
+                            <span className="line-clamp-2 break-words">{event.description}</span>
                           </div>
                         )}
+
+                        {event.team_id && (
+                          <span className="inline-block mt-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                            Team event
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEditEvent?.(event)} data-testid={`day-view-edit-${event.event_id}`}>
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => onDeleteEvent?.(event.event_id)} data-testid={`day-view-delete-${event.event_id}`}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => onEditEvent?.(event)}
-                        title="Edit event"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 hover:text-destructive"
-                        onClick={() => onDeleteEvent?.(event.event_id)}
-                        title="Delete event"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </div>
+        </ScrollArea>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border bg-card sticky bottom-0 flex items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onClose}
-          >
-            Close
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => onCreateEvent?.({ date: new Date(date), time: "09:00" })}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            New Event
+        <div className="px-5 py-3 border-t border-border flex items-center justify-between">
+          <Button variant="ghost" size="sm" onClick={onClose} className="text-xs">Close</Button>
+          <Button size="sm" onClick={() => onCreateEvent?.()} className="text-xs" data-testid="day-view-footer-create-btn">
+            <Plus className="h-3.5 w-3.5 mr-1" /> New Event
           </Button>
         </div>
       </div>
