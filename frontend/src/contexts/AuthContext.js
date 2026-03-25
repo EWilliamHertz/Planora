@@ -26,7 +26,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(TOKEN_KEY);
   };
 
- const checkAuth = async () => {
+const checkAuth = async () => {
     try {
       const response = await fetch(`${API_URL}/api/users/me`); // Or your specific endpoint
       const data = await response.json();
