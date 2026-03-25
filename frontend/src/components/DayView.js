@@ -44,11 +44,15 @@ const dayEvents = events
       return a.start_time.localeCompare(b.start_time);
     });
   const formatTimeRange = (startTime, endTime) => {
-    return `${format(parseISO(startTime), "h:mm a")} – ${format(parseISO(endTime), "h:mm a")}`;
+    const safeStart = startTime.endsWith('Z') ? startTime.slice(0, -1) : startTime;
+    const safeEnd = endTime.endsWith('Z') ? endTime.slice(0, -1) : endTime;
+    return `${format(parseISO(safeStart), "h:mm a")} – ${format(parseISO(safeEnd), "h:mm a")}`;
   };
 
   const getDuration = (startTime, endTime) => {
-    const mins = Math.floor((parseISO(endTime) - parseISO(startTime)) / 60000);
+    const safeStart = startTime.endsWith('Z') ? startTime.slice(0, -1) : startTime;
+    const safeEnd = endTime.endsWith('Z') ? endTime.slice(0, -1) : endTime;
+    const mins = Math.floor((parseISO(safeEnd) - parseISO(safeStart)) / 60000);
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     if (h === 0) return `${m}min`;
