@@ -26,41 +26,32 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(TOKEN_KEY);
   };
 
-const checkAuth = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/users/me`); // Or your specific endpoint
-      const data = await response.json();
-      
-      // The crucial fix: Only set the user if the response is OK AND has actual user data
-      if (response.ok && data && !data.detail) { 
-        setUser(data);
-      } else {
-        // If it's a 401 or has an error detail, forcefully clear the user to trigger the /login redirect
-        setUser(null); 
-      }
-    } catch (error) {
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+const checkAuth = useCallback(async () => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
       setLoading(false);
+      setUser(null);
       return;
     }
 
     try {
       const res = await authFetch(`${API_URL}/api/auth/me`);
-      if (res.ok) {
-        setUser(await res.json());
+      const data = await res.json();
+      
+      // The crucial fix: Only set the user if the response is OK AND has actual user data
+      if (res.ok && data && !data.detail) { 
+        setUser(data);
       } else {
+        // If it's a 401 or has an error detail, forcefully clear the user to trigger the /login redirect
         clearToken();
+        setUser(null); 
       }
-    } catch {
-      // Not authenticated
+    } catch (error) {
+      clearToken();
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
