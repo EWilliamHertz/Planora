@@ -607,10 +607,8 @@ async def invite_to_event(event_id: str, data: EventInvite, request: Request):
 
 # ── Users Available ───────────────────────────────────────────────────────────
 
-# Hardcoded user that should appear in everyone's invite suggestions
-HARDCODED_USERS = [
-    {"user_id": "hardcoded_ernst", "name": "Ernst-William Hertz", "email": "ewilliamhe@gmail.com", "picture": None}
-]
+# Hardcoded users removed for production
+HARDCODED_USERS = []
 
 @api_router.get("/users/available")
 async def get_available_users(request: Request, search: Optional[str] = None):
@@ -1477,10 +1475,16 @@ async def websocket_endpoint(websocket: WebSocket, session_token: str):
 
 app.include_router(api_router)
 
+# Replace 'your-vercel-app.vercel.app' with your actual Vercel domain
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://planora-tau-seven.vercel.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origin_regex=".*",
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1493,7 +1497,8 @@ async def startup():
         raise RuntimeError("DATABASE_URL environment variable is required")
     
     try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=10)
+        # Reduced max_size to 2 for Serverless compatibility to prevent connection exhaustion
+        db_pool = await asyncpg.create_pool(DATABASE_URL, init=_init_conn, min_size=1, max_size=2)
         logger.info("Database pool created")
     except Exception as e:
         logger.error(f"Failed to create database pool: {e}")

@@ -59,22 +59,17 @@ export default function DashboardPage() {
     return !localStorage.getItem("planora_onboarded");
   });
 
-  // Real-time task updates via WebSocket
-  const handleWsMessage = useCallback((data) => {
-    if (data.type === "task_update") {
-      if (data.action === "created") {
-        setTasks((prev) => {
-          if (prev.find((t) => t.task_id === data.task.task_id)) return prev;
-          return [...prev, data.task];
-        });
-      } else if (data.action === "updated") {
-        setTasks((prev) => prev.map((t) => t.task_id === data.task.task_id ? data.task : t));
-      } else if (data.action === "deleted") {
-        setTasks((prev) => prev.filter((t) => t.task_id !== data.task.task_id));
-      }
-    }
+  // Replaced WebSockets with HTTP Polling for Vercel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      authFetch(`${API_URL}/api/tasks`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => { if (data) setTasks(data); })
+        .catch(console.error);
+    }, 15000); // Poll every 15 seconds
+    
+    return () => clearInterval(interval);
   }, []);
-  useWebSocket(handleWsMessage);
 
   // Event reminders
   useReminders();
