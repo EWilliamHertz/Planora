@@ -38,8 +38,11 @@ const dayEvents = events
       const parsedDate = parseISO(safeDateStr);
       return isValid(parsedDate) && isSameDay(parsedDate, date);
     })
-  })    .sort((a, b) => parseISO(a.start_time).getTime() - parseISO(b.start_time).getTime());
-
+    .sort((a, b) => {
+      // Sort events chronologically
+      if (!a.start_time || !b.start_time) return 0;
+      return a.start_time.localeCompare(b.start_time);
+    });
   const formatTimeRange = (startTime, endTime) => {
     return `${format(parseISO(startTime), "h:mm a")} – ${format(parseISO(endTime), "h:mm a")}`;
   };

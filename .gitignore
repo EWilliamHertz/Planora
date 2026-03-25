@@ -160,3 +160,4 @@ frontend/node_modules/.cache/default-development/11.pack
 # Environment files
 *.env
 *.env.*
+.env*.local
