@@ -22,7 +22,7 @@ import {
 import { Trash2, X, Search, Users, Repeat, Bell, Mail, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const COLORS = [
   { value: "indigo", label: "Indigo", className: "bg-indigo-500" },
