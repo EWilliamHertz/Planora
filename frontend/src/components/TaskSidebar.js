@@ -43,6 +43,14 @@ function formatDueLabel(dateStr) {
   return format(d, "MMM d");
 }
 
+// Helper to safely ensure UTC parsing
+const safeParseDate = (dateStr) => {
+  if (!dateStr) return new Date();
+  // If the backend strips the 'Z', add it back so the browser knows it's absolute time
+  const normalizedStr = dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`;
+  return parseISO(normalizedStr);
+};
+
 export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDeleteTask, onCreateTask }) {
   const [categoryFilter, setCategoryFilter] = useState(null);
 
@@ -212,7 +220,7 @@ const upcomingEvents = events
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{event.title}</div>
                   <div className="text-xs text-muted-foreground">
-                    {format(parseISO(event.start_time), "EEE, MMM d 'at' h:mm a")}
+                    {format(safeParseDate(event.start_time), "EEE, MMM d 'at' h:mm a")}
                   </div>
                 </div>
               </div>
