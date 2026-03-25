@@ -398,7 +398,34 @@ async def create_notification(user_id: str, type: str, title: str, message: str,
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+# Invites ──────────────────────────────────────────────────────────────
+@api_router.get("/invites/pending")
+async def get_pending_invites(user_data: dict = Depends(verify_session)):
+    # Example SQL: Fetch invites where the target email matches the logged-in user and status is 'pending'
+    async with db_pool.acquire() as conn:
+        invites = await conn.fetch("""
+            SELECT invite_id, type, sender_name, target_name 
+            FROM invites 
+            WHERE invitee_email = $1 AND status = 'pending'
+            ORDER BY created_at DESC
+        """, user_data["email"])
+    return [dict(inv) for inv in invites]
 
+@api_router.post("/invites/{invite_id}/accept")
+async def accept_invite(invite_id: str, user_data: dict = Depends(verify_session)):
+    async with db_pool.acquire() as conn:
+        # 1. Update invite status to 'accepted'
+        # 2. Add the user to the team/event table
+        # ... logic here ...
+        pass
+    return {"message": "Invite accepted"}
+
+@api_router.post("/invites/{invite_id}/decline")
+async def decline_invite(invite_id: str, user_data: dict = Depends(verify_session)):
+    async with db_pool.acquire() as conn:
+        # Update invite status to 'declined' or delete it
+        await conn.execute("UPDATE invites SET status = 'declined' WHERE invite_id = $1", invite_id)
+    return {"message": "Invite declined"}
 # ── Auth Endpoints ───────────────────────────────────────────────────────────
 
 @api_router.post("/auth/register")
