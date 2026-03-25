@@ -43,12 +43,12 @@ function formatDueLabel(dateStr) {
   return format(d, "MMM d");
 }
 
-// Helper to safely ensure UTC parsing
+// Helper to strictly enforce LOCAL time (fixing the timezone shift bug)
 const safeParseDate = (dateStr) => {
   if (!dateStr) return new Date();
-  // If the backend strips the 'Z', add it back so the browser knows it's absolute time
-  const normalizedStr = dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`;
-  return parseISO(normalizedStr);
+  // Strip the 'Z' (UTC tag) so the browser doesn't incorrectly shift the time
+  const localStr = dateStr.endsWith('Z') ? dateStr.slice(0, -1) : dateStr;
+  return parseISO(localStr);
 };
 
 export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDeleteTask, onCreateTask }) {

@@ -211,9 +211,11 @@ export default function DashboardPage() {
       const rec = event.recurrence;
       if (!rec || !rec.type || rec.type === "none") return;
 
-     const eventStart = parseISO(event.start_time);
-const eventEnd = parseISO(event.end_time);
-if (!isValid(eventStart) || !isValid(eventEnd)) return;
+    // Strip 'Z' to strictly enforce local time and prevent visual shifting on the grid
+      const eventStart = parseISO(event.start_time.endsWith('Z') ? event.start_time.slice(0, -1) : event.start_time);
+      const eventEnd = parseISO(event.end_time.endsWith('Z') ? event.end_time.slice(0, -1) : event.end_time);
+      
+      if (!isValid(eventStart) || !isValid(eventEnd)) return;
       const duration = eventEnd.getTime() - eventStart.getTime();
       const recEnd = rec.end_date ? parseISO(rec.end_date) : addMonths(eventStart, 3);
 

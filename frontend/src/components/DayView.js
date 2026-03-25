@@ -31,10 +31,13 @@ export function DayView({ date, events = [], onClose, onEditEvent, onDeleteEvent
   if (!date) return null;
 
 const dayEvents = events
-  .filter((event) => {
-    if (!event.start_time) return false;
-    const parsedDate = parseISO(event.start_time);
-    return isValid(parsedDate) && isSameDay(parsedDate, date);
+    .filter((event) => {
+      if (!event.start_time) return false;
+      // Strip 'Z' to prevent events from jumping to the wrong day via timezone offsets
+      const safeDateStr = event.start_time.endsWith('Z') ? event.start_time.slice(0, -1) : event.start_time;
+      const parsedDate = parseISO(safeDateStr);
+      return isValid(parsedDate) && isSameDay(parsedDate, date);
+    })
   })    .sort((a, b) => parseISO(a.start_time).getTime() - parseISO(b.start_time).getTime());
 
   const formatTimeRange = (startTime, endTime) => {
