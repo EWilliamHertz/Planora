@@ -26,33 +26,24 @@ export function AuthProvider({ children }) {
     localStorage.removeItem(TOKEN_KEY);
   };
 
-  const checkAuth = useCallback(async () => {
-    // Handle Google OAuth callback — the redirect lands with #session_id=XXXX in the hash
-    if (window.location.hash?.includes("session_id=")) {
-      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-      const sessionId = params.get("session_id");
-      if (sessionId) {
-        try {
-          const res = await fetch(`${API_URL}/api/auth/session?session_id=${sessionId}`, {
-            credentials: "include",
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.session_token) {
-              storeToken(data.session_token);
-              setUser(data);
-            }
-          }
-        } catch {
-          // ignore network errors
-        }
-        // Clean the hash from the URL so it doesn't re-trigger
-        window.history.replaceState({}, document.title, window.location.pathname);
+ const checkAuth = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/users/me`); // Or your specific endpoint
+      const data = await response.json();
+      
+      // The crucial fix: Only set the user if the response is OK AND has actual user data
+      if (response.ok && data && !data.detail) { 
+        setUser(data);
+      } else {
+        // If it's a 401 or has an error detail, forcefully clear the user to trigger the /login redirect
+        setUser(null); 
       }
+    } catch (error) {
+      setUser(null);
+    } finally {
       setLoading(false);
-      return;
     }
-
+  };
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) {
       setLoading(false);
