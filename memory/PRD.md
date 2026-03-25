@@ -1,59 +1,45 @@
 # Planora - PRD
 
 ## Overview
-Modern scheduling/calendar/task planner combining Calendly + Google Calendar + collaborative task management. Built with React frontend, FastAPI backend, NeonDB (PostgreSQL).
+Modern scheduling/calendar/task planner combining Calendly + Google Calendar + collaborative task management.
 
 ## Architecture
-- **Frontend**: React + Tailwind CSS + Shadcn/UI, deployed to Vercel
-- **Backend**: FastAPI (Python), deployed as Vercel Serverless Functions via `api/index.py`
+- **Frontend**: React + Tailwind CSS + Shadcn/UI
+- **Backend**: FastAPI (Python), Vercel Serverless Functions via `api/index.py`
 - **Database**: NeonDB (PostgreSQL via asyncpg)
-- **Auth**: Cookie + Bearer token (localStorage), Emergent Google OAuth
+- **Deployment**: Vercel (frontend + backend together)
+
+## Environment Variables (Vercel)
+- DATABASE_URL, RESEND_API_KEY, SENDER_EMAIL, FRONTEND_URL, REACT_APP_BACKEND_URL
+- GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BACKEND_EXTERNAL_URL, CORS_ORIGINS
 
 ## Core Features (Implemented)
-- User registration/login (email + Google OAuth)
-- Token-based auth with localStorage persistence (fixes cross-origin cookie issues on Vercel)
-- Calendar views: Month, Week, Day, Board (Kanban)
-- Event CRUD with colors, recurrence, reminders, attendees
+- User auth (email + Google OAuth) with token persistence (localStorage + Bearer header)
+- Calendar views: Month, Week, Day, Kanban
+- Event CRUD with colors, recurrence, reminders, attendees, team_id
 - Multi-day event spanning across calendar cells
-- Team events with `team_id` field
 - Task management with categories and Kanban view
+- Team workspaces with team events
 - Availability scheduling + public booking links
 - Google Calendar 2-way sync
-- Calendar sharing with view/edit permissions
-- Real-time collaboration via WebSockets
-- Notification center system
+- Calendar sharing (view/edit permissions)
+- Notification center
 - Email notifications via Resend
-- Weekly email digest
-- Stripe subscription plans (Free/Pro/Business)
+- Weekly email digest with toggle
 - Analytics dashboard
 - iCal export
 - 3-step onboarding wizard
-- PWA capabilities
-- Animated empty states with helpful tips
+- Animated empty states
 
-## Bug Fixes Applied (March 2026)
-1. **Notification endpoints crash**: Fixed `(await db_pool).acquire()` → `db_pool.acquire()` — asyncpg Pool is not awaitable
-2. **EventCreate missing team_id**: Added `team_id` field to EventCreate/EventUpdate models and events table schema
-3. **GET /api/events missing team events**: Updated query to include events from user's teams
-4. **Vercel build failure**: Removed `emergentintegrations` from requirements.txt; made import conditional with `try/except`
-5. **Missing config variables**: Added RESEND, Google, Stripe config variable declarations to server.py
-6. **Session persistence**: Added DATABASE_URL env var for local dev; token-based auth via localStorage
-
-## Database Schema
-- users, user_sessions, events (with team_id), tasks, availability, bookings, booking_links, calendar_shares, teams, payment_transactions, user_preferences, notifications
-
-## Key API Endpoints
-- `/api/auth/*` — register, login, session, me, logout
-- `/api/events` — CRUD + team events
-- `/api/tasks` — CRUD with Kanban status
-- `/api/teams/*` — CRUD + invite/remove members
-- `/api/notifications/*` — list, unread count, mark read, delete
-- `/api/plans`, `/api/subscribe`, `/api/webhook/stripe` — Stripe subscriptions
-- `/api/user/preferences/digest`, `/api/digest/send` — email digest
-- `/api/gcal/*` — Google Calendar sync
-- `/api/calendar/share`, `/api/calendar/shares` — calendar sharing
+## Bug Fixes (March 25, 2026)
+1. Notification endpoints: Fixed `(await db_pool).acquire()` → `db_pool.acquire()`
+2. EventCreate missing `team_id`: Added field + migration
+3. GET /api/events: Now returns team events user belongs to
+4. Removed `emergentintegrations` dependency (breaks Vercel build)
+5. Added missing config variables (RESEND, Google, etc.)
+6. Cleaned requirements.txt for Vercel compatibility
 
 ## Backlog
 - P2: Drag to resize events in week/day views
-- P2: Smart scheduling suggestions based on analytics
-- P2: Stripe integration on Vercel (requires native `stripe` package instead of emergentintegrations)
+- P2: Smart scheduling suggestions
+- P3: Stripe premium plans (deferred by user)

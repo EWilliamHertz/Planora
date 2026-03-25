@@ -20,13 +20,6 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-try:
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
-    STRIPE_AVAILABLE = True
-except ImportError:
-    STRIPE_AVAILABLE = False
-    logger = logging.getLogger(__name__)  # pre-declare so code below doesn't crash
-
 ROOT_DIR = Path(__file__).parent
 env_path = ROOT_DIR / '.env'
 if env_path.exists():
@@ -63,14 +56,6 @@ GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 BACKEND_EXTERNAL_URL = os.environ.get('BACKEND_EXTERNAL_URL', '')
 GCAL_SCOPES = ['https://www.googleapis.com/auth/calendar']
 GCAL_REDIRECT_URI = f"{BACKEND_EXTERNAL_URL}/api/gcal/callback" if BACKEND_EXTERNAL_URL else ''
-
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
-
-SUBSCRIPTION_PLANS = {
-    "free": {"name": "Free", "amount": 0.0, "features": ["5 events/month", "Basic calendar views", "1 booking link"]},
-    "pro": {"name": "Pro", "amount": 9.00, "features": ["Unlimited events", "Google Calendar sync", "Custom booking links", "Email notifications", "Priority support"]},
-    "business": {"name": "Business", "amount": 29.00, "features": ["Everything in Pro", "Team workspaces", "Analytics dashboard", "Multi-calendar sharing", "Weekly email digest", "API access"]},
-}
 
 async def _init_conn(conn):
     """Register JSON/JSONB codecs so dicts/lists pass through automatically."""
@@ -177,19 +162,6 @@ CREATE TABLE IF NOT EXISTS teams (
     owner_id   TEXT NOT NULL,
     members    JSONB DEFAULT '[]'::jsonb,
     created_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS payment_transactions (
-    session_id     TEXT PRIMARY KEY,
-    user_id        TEXT NOT NULL,
-    plan_id        TEXT,
-    amount         NUMERIC,
-    currency       TEXT DEFAULT 'usd',
-    metadata       JSONB,
-    payment_status TEXT DEFAULT 'initiated',
-    status         TEXT,
-    paid_at        TEXT,
-    created_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1236,118 +1208,6 @@ async def get_team(team_id: str, request: Request):
     if not team:
         raise HTTPException(status_code=404, detail="Team not found or no access")
     return team
-
-# ── Plans & Stripe ────────────────────────────────────────────────────────────
-
-@api_router.get("/plans")
-async def get_plans():
-    return [{"plan_id": k, **v} for k, v in SUBSCRIPTION_PLANS.items()]
-
-@api_router.get("/user/plan")
-async def get_user_plan(request: Request):
-    user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
-        row = _row(await conn.fetchrow("SELECT plan FROM users WHERE user_id=$1", user["user_id"]))
-    plan = (row or {}).get("plan", "free")
-    return {"plan": plan, "plan_details": SUBSCRIPTION_PLANS.get(plan, SUBSCRIPTION_PLANS["free"])}
-
-class SubscriptionCheckout(BaseModel):
-    plan_id: str
-    origin_url: str
-
-@api_router.post("/subscribe")
-async def create_subscription(data: SubscriptionCheckout, request: Request):
-    if not STRIPE_AVAILABLE:
-        raise HTTPException(status_code=400, detail="Stripe integration not available")
-    user = await get_current_user(request)
-    if data.plan_id not in SUBSCRIPTION_PLANS or data.plan_id == "free":
-        raise HTTPException(status_code=400, detail="Invalid plan")
-    plan   = SUBSCRIPTION_PLANS[data.plan_id]
-    amount = plan["amount"]
-    host_url    = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    success_url = f"{data.origin_url}/settings?payment=success&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url  = f"{data.origin_url}/settings?payment=cancelled"
-    metadata = {"user_id": user["user_id"], "plan_id": data.plan_id, "user_email": user["email"]}
-    checkout_request = CheckoutSessionRequest(amount=amount, currency="usd",
-                                              success_url=success_url, cancel_url=cancel_url,
-                                              metadata=metadata)
-    session = await stripe_checkout.create_checkout_session(checkout_request)
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO payment_transactions (session_id,user_id,plan_id,amount,currency,metadata,payment_status,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-            session.session_id, user["user_id"], data.plan_id, amount, "usd", metadata, "initiated",
-            datetime.now(timezone.utc).isoformat()
-        )
-    return {"url": session.url, "session_id": session.session_id}
-
-@api_router.get("/subscribe/status/{session_id}")
-async def check_subscription_status(session_id: str, request: Request):
-    if not STRIPE_AVAILABLE:
-        raise HTTPException(status_code=400, detail="Stripe integration not available")
-    user = await get_current_user(request)
-    async with db_pool.acquire() as conn:
-        txn = _row(await conn.fetchrow(
-            "SELECT * FROM payment_transactions WHERE session_id=$1 AND user_id=$2",
-            session_id, user["user_id"]
-        ))
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    if txn.get("payment_status") == "paid":
-        return {"status": "paid", "plan_id": txn["plan_id"]}
-
-    host_url    = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    status = await stripe_checkout.get_checkout_status(session_id)
-    now    = datetime.now(timezone.utc).isoformat()
-
-    if status.payment_status == "paid":
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE payment_transactions SET payment_status='paid', status=$1, paid_at=$2 WHERE session_id=$3",
-                status.status, now, session_id
-            )
-            await conn.execute("UPDATE users SET plan=$1 WHERE user_id=$2", txn["plan_id"], user["user_id"])
-        return {"status": "paid", "plan_id": txn["plan_id"]}
-
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE payment_transactions SET payment_status=$1, status=$2 WHERE session_id=$3",
-            status.payment_status, status.status, session_id
-        )
-    return {"status": status.status, "payment_status": status.payment_status, "plan_id": txn["plan_id"]}
-
-@api_router.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
-    if not STRIPE_AVAILABLE:
-        return {"received": True}
-    body = await request.body()
-    sig  = request.headers.get("Stripe-Signature", "")
-    try:
-        host_url    = str(request.base_url).rstrip("/")
-        webhook_url = f"{host_url}api/webhook/stripe"
-        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-        event = await stripe_checkout.handle_webhook(body, sig)
-        if event.payment_status == "paid" and event.session_id:
-            async with db_pool.acquire() as conn:
-                txn = _row(await conn.fetchrow(
-                    "SELECT * FROM payment_transactions WHERE session_id=$1 AND payment_status != 'paid'",
-                    event.session_id
-                ))
-                if txn:
-                    now = datetime.now(timezone.utc).isoformat()
-                    await conn.execute(
-                        "UPDATE payment_transactions SET payment_status='paid', status='complete', paid_at=$1 WHERE session_id=$2",
-                        now, event.session_id
-                    )
-                    await conn.execute("UPDATE users SET plan=$1 WHERE user_id=$2",
-                                       txn["plan_id"], txn["user_id"])
-    except Exception as e:
-        logger.error(f"Stripe webhook error: {e}")
-    return {"received": True}
 
 # ── User Preferences & Digest ─────────────────────────────────────────────────
 
