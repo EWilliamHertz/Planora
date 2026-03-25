@@ -11,6 +11,7 @@ import { TaskModal } from "@/components/TaskModal";
 import { TaskSidebar } from "@/components/TaskSidebar";
 import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { KanbanView } from "@/components/KanbanView";
+import { NotificationCenter } from "@/components/NotificationCenter";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useReminders } from "@/hooks/useReminders";
 import {
@@ -349,6 +350,7 @@ export default function DashboardPage() {
             </Tabs>
 
             <div className="flex items-center gap-1.5">
+              <NotificationCenter />
               <Button data-testid="create-event-btn" size="sm" className="h-8 text-xs" onClick={() => { setEditingEvent(null); setSelectedDate(new Date()); setShowEventModal(true); }}>
                 <Plus className="h-3.5 w-3.5 mr-1" /> Event
               </Button>
