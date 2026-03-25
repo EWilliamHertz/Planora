@@ -16,13 +16,14 @@ export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Fetch pending invites
+// Fetch pending invites
   const fetchInvites = useCallback(async () => {
     try {
       const res = await authFetch(`${API_URL}/api/invites/pending`);
       if (res.ok) {
         const data = await res.json();
-        setInvites(data);
+        // Ensure data is strictly an Array before updating state
+        setInvites(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error("Failed to fetch invites", error);
