@@ -1,13 +1,13 @@
 {
+  "buildCommand": "yarn build",
+  "outputDirectory": "build",
+  "framework": "create-react-app",
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
-      "source": "/(.*\\.html)",
+      "source": "/service-worker.js",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" },
@@ -15,7 +15,7 @@
       ]
     },
     {
-      "source": "/service-worker.js",
+      "source": "/index.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
       ]
