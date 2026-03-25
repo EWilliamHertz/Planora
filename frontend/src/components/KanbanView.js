@@ -6,7 +6,11 @@ import { cn } from "@/lib/utils";
 import { Plus, GripVertical, Clock, Inbox, PlayCircle, CheckCircle2 } from "lucide-react";
 import { format, parseISO, isToday, isTomorrow, isBefore } from "date-fns";
 import { EmptyState } from "@/components/EmptyState";
-
+const EMPTY_MESSAGES = {
+  todo: "No tasks to do. Grab a coffee! ☕",
+  in_progress: "Nothing in progress right now. 🚀",
+  done: "No finished tasks yet. Let's get to work! 💪"
+};
 const CATEGORY_COLORS = {
   work: "bg-indigo-500",
   personal: "bg-emerald-500",
