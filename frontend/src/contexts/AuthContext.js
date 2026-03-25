@@ -4,9 +4,20 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const TOKEN_KEY = "planora_session_token";
 const AuthContext = createContext(null);
 
+// Safe Storage Helpers to prevent Private Window crashes
+const getSafeToken = () => {
+  try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+};
+const setSafeToken = (token) => {
+  try { if (token) localStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+};
+const removeSafeToken = () => {
+  try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+};
+
 /** Authenticated fetch — attaches session token as Bearer header */
 export async function authFetch(url, options = {}) {
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = getSafeToken();
   const headers = { ...(options.headers || {}) };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -18,16 +29,8 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const storeToken = (token) => {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-  };
-
-  const clearToken = () => {
-    localStorage.removeItem(TOKEN_KEY);
-  };
-
-const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
+  const checkAuth = useCallback(async () => {
+    const token = getSafeToken();
     if (!token) {
       setLoading(false);
       setUser(null);
@@ -38,16 +41,14 @@ const checkAuth = useCallback(async () => {
       const res = await authFetch(`${API_URL}/api/auth/me`);
       const data = await res.json();
       
-      // The crucial fix: Only set the user if the response is OK AND has actual user data
       if (res.ok && data && !data.detail) { 
         setUser(data);
       } else {
-        // If it's a 401 or has an error detail, forcefully clear the user to trigger the /login redirect
-        clearToken();
+        removeSafeToken();
         setUser(null); 
       }
     } catch (error) {
-      clearToken();
+      removeSafeToken();
       setUser(null);
     } finally {
       setLoading(false);
@@ -70,7 +71,7 @@ const checkAuth = useCallback(async () => {
       throw new Error(err.detail || "Login failed");
     }
     const data = await res.json();
-    storeToken(data.session_token);
+    setSafeToken(data.session_token);
     setUser(data);
     return data;
   };
@@ -87,7 +88,7 @@ const checkAuth = useCallback(async () => {
       throw new Error(err.detail || "Registration failed");
     }
     const data = await res.json();
-    storeToken(data.session_token);
+    setSafeToken(data.session_token);
     setUser(data);
     return data;
   };
@@ -98,7 +99,7 @@ const checkAuth = useCallback(async () => {
     } catch {
       // Ignore
     }
-    clearToken();
+    removeSafeToken();
     setUser(null);
   };
 
@@ -108,7 +109,7 @@ const checkAuth = useCallback(async () => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout, loginWithGoogle, storeToken, authFetch }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, register, logout, loginWithGoogle, authFetch }}>
       {children}
     </AuthContext.Provider>
   );
