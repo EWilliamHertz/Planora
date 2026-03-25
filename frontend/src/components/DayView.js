@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { parseISO, format, isToday, isSameDay } from "date-fns";
+import { parseISO, format, isToday, isSameDay, isValid } from "date-fns";
 import { X, Edit2, Trash2, Plus, Clock, Users, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+
 
 const COLOR_MAP = {
   indigo:  { border: "#6366f1", bg: "bg-indigo-50 dark:bg-indigo-950/30",  text: "text-indigo-700 dark:text-indigo-300" },
@@ -29,12 +30,12 @@ export function DayView({ date, events = [], onClose, onEditEvent, onDeleteEvent
 
   if (!date) return null;
 
-  const dayEvents = events
-    .filter((event) => {
-      if (!event.start_time) return false;
-      return isSameDay(parseISO(event.start_time), date);
-    })
-    .sort((a, b) => parseISO(a.start_time).getTime() - parseISO(b.start_time).getTime());
+const dayEvents = events
+  .filter((event) => {
+    if (!event.start_time) return false;
+    const parsedDate = parseISO(event.start_time);
+    return isValid(parsedDate) && isSameDay(parsedDate, date);
+  })    .sort((a, b) => parseISO(a.start_time).getTime() - parseISO(b.start_time).getTime());
 
   const formatTimeRange = (startTime, endTime) => {
     return `${format(parseISO(startTime), "h:mm a")} – ${format(parseISO(endTime), "h:mm a")}`;

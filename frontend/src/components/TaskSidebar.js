@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Plus, Clock, CalendarDays, Trash2, ClipboardList, CalendarCheck } from "lucide-react";
-import { format, parseISO, isBefore, isToday, isTomorrow } from "date-fns";
+import { format, parseISO, isBefore, isToday, isTomorrow, isValid } from "date-fns";
 import { EmptyState } from "@/components/EmptyState";
 
 const EVENT_DOT_COLORS = {
@@ -55,10 +55,14 @@ export function TaskSidebar({ tasks, events, onToggleTask, onTaskClick, onDelete
     return a.due_date.localeCompare(b.due_date);
   });
 
-  const upcomingEvents = events
-    .filter((e) => e.start_time && !isBefore(parseISO(e.start_time), new Date()))
-    .sort((a, b) => a.start_time.localeCompare(b.start_time))
-    .slice(0, 5);
+const upcomingEvents = events
+  .filter((e) => {
+    if (!e.start_time) return false;
+    const parsedDate = parseISO(e.start_time);
+    return isValid(parsedDate) && !isBefore(parsedDate, new Date());
+  })
+  .sort((a, b) => a.start_time.localeCompare(b.start_time))
+  .slice(0, 5);
 
   return (
     <div className="h-full flex flex-col" data-testid="task-sidebar">
