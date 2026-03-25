@@ -63,7 +63,11 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   useEffect(() => {
     const fetchAvailableUsers = async () => {
       try {
-        const response = await authFetch("/api/users/available", {
+        // Build URL with search param if searchQuery is present
+        const url = searchQuery 
+          ? `/api/users/available?search=${encodeURIComponent(searchQuery)}`
+          : "/api/users/available";
+        const response = await authFetch(url, {
           method: "GET",
         });
         if (response.ok) {
@@ -98,7 +102,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       fetchAvailableUsers();
       fetchUserTeams();
     }
-  }, [open, authFetch]);
+  }, [open, authFetch, searchQuery]);
 
   useEffect(() => {
     if (event) {

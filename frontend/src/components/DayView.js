@@ -67,9 +67,14 @@ export function DayView({ date, events = [], onClose, onEditEvent, onDeleteEvent
               {dayEvents.length} event{dayEvents.length !== 1 ? "s" : ""}
             </p>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} data-testid="day-view-close-btn">
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="default" onClick={() => onCreateEvent?.()} data-testid="day-view-header-create-btn" className="h-8 text-xs">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Event
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} data-testid="day-view-close-btn">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Content */}
@@ -113,9 +118,9 @@ export function DayView({ date, events = [], onClose, onEditEvent, onDeleteEvent
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
                             <Users className="h-3 w-3 shrink-0" />
                             <span className="truncate">
-                              {event.attendees.length <= 2
+                              Shared with {event.attendees.length <= 2
                                 ? event.attendees.map((a) => a.name || a.email).join(", ")
-                                : `${event.attendees.slice(0, 2).map((a) => a.name || a.email).join(", ")} +${event.attendees.length - 2}`}
+                                : `${event.attendees.slice(0, 2).map((a) => a.name || a.email).join(", ")} +${event.attendees.length - 2} more`}
                             </span>
                           </div>
                         )}

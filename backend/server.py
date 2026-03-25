@@ -548,6 +548,104 @@ async def delete_event(event_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Event not found")
     return {"message": "Deleted"}
 
+# ── Event Invitation ──────────────────────────────────────────────────────────
+
+class EventInvite(BaseModel):
+    guest_email: str
+    guest_name: Optional[str] = None
+
+@api_router.post("/events/{event_id}/invite")
+async def invite_to_event(event_id: str, data: EventInvite, request: Request):
+    """Send email invitation for an event to a guest"""
+    user = await get_current_user(request)
+    async with db_pool.acquire() as conn:
+        event = _row(await conn.fetchrow(
+            "SELECT * FROM events WHERE event_id=$1 AND user_id=$2", event_id, user["user_id"]
+        ))
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Send email via Resend
+    if RESEND_API_KEY:
+        try:
+            start_dt = datetime.fromisoformat(event["start_time"].replace("Z", "+00:00")) if event.get("start_time") else None
+            end_dt = datetime.fromisoformat(event["end_time"].replace("Z", "+00:00")) if event.get("end_time") else None
+            formatted_time = start_dt.strftime("%A, %B %d at %I:%M %p UTC") if start_dt else "TBD"
+            formatted_end = end_dt.strftime("%I:%M %p UTC") if end_dt else ""
+            duration = ""
+            if start_dt and end_dt:
+                mins = int((end_dt - start_dt).total_seconds() / 60)
+                duration = f"{mins} minutes"
+            
+            resend.Emails.send({
+                "from": f"Planora <{SENDER_EMAIL}>",
+                "to": [data.guest_email],
+                "subject": f"You're invited: {event['title']}",
+                "html": f"""<div style="font-family:'DM Sans',Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:32px;background:#f8f8fc;border-radius:16px">
+                    <div style="background:#1e1b4b;color:#fff;padding:28px;border-radius:12px;margin-bottom:20px">
+                        <h1 style="font-family:'Manrope',sans-serif;margin:0 0 8px;font-size:22px">Event Invitation</h1>
+                        <p style="color:#a5b4fc;margin:0;font-size:14px">{user['name'] or user['email']} invited you to an event</p>
+                    </div>
+                    <div style="background:#fff;padding:24px;border-radius:12px;border:1px solid #e5e7eb">
+                        <h2 style="margin:0 0 16px;font-size:18px;color:#1e1b4b">{event['title']}</h2>
+                        <p style="margin:0 0 12px;font-size:15px"><strong>When:</strong> {formatted_time}{' - ' + formatted_end if formatted_end else ''}</p>
+                        {f'<p style="margin:0 0 12px;font-size:15px"><strong>Duration:</strong> {duration}</p>' if duration else ''}
+                        {f'<p style="margin:0 0 12px;font-size:15px"><strong>Description:</strong> {event.get("description", "")}</p>' if event.get("description") else ''}
+                        <p style="margin:0;font-size:13px;color:#6b7280">Invited by {user['name'] or user['email']}</p>
+                    </div>
+                    <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:20px">Powered by Planora</p>
+                </div>"""
+            })
+            logger.info(f"Event invitation email sent to {data.guest_email} for event {event_id}")
+            return {"message": "Invitation sent", "email": data.guest_email}
+        except Exception as e:
+            logger.error(f"Failed to send event invite email: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    else:
+        logger.warning("Resend API key not configured, skipping email")
+        return {"message": "Email service not configured, invitation recorded", "email": data.guest_email}
+
+# ── Users Available ───────────────────────────────────────────────────────────
+
+# Hardcoded user that should appear in everyone's invite suggestions
+HARDCODED_USERS = [
+    {"user_id": "hardcoded_ernst", "name": "Ernst-William Hertz", "email": "ewilliamhe@gmail.com", "picture": None}
+]
+
+@api_router.get("/users/available")
+async def get_available_users(request: Request, search: Optional[str] = None):
+    """Get list of users available for inviting to events. Includes hardcoded users."""
+    user = await get_current_user(request)
+    async with db_pool.acquire() as conn:
+        if search:
+            # Search by name or email
+            rows = await conn.fetch(
+                "SELECT user_id, name, email, picture FROM users WHERE user_id != $1 AND (LOWER(name) LIKE $2 OR LOWER(email) LIKE $2) LIMIT 20",
+                user["user_id"], f"%{search.lower()}%"
+            )
+        else:
+            # Return all users except current user (limit for performance)
+            rows = await conn.fetch(
+                "SELECT user_id, name, email, picture FROM users WHERE user_id != $1 LIMIT 50",
+                user["user_id"]
+            )
+    
+    db_users = _rows(rows)
+    
+    # Add hardcoded users if not already in results and they match search (if provided)
+    result = list(db_users)
+    for hc_user in HARDCODED_USERS:
+        if hc_user["email"] != user["email"]:  # Don't show hardcoded user if it's the current user
+            if search:
+                if search.lower() in hc_user["name"].lower() or search.lower() in hc_user["email"].lower():
+                    if not any(u["email"] == hc_user["email"] for u in result):
+                        result.append(hc_user)
+            else:
+                if not any(u["email"] == hc_user["email"] for u in result):
+                    result.append(hc_user)
+    
+    return result
+
 # ── Tasks ────────────────────────────────────────────────────────────────────
 
 @api_router.get("/tasks")
