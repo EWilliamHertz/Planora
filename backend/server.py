@@ -19,7 +19,13 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
+
+try:
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
+    STRIPE_AVAILABLE = True
+except ImportError:
+    STRIPE_AVAILABLE = False
+    logger = logging.getLogger(__name__)  # pre-declare so code below doesn't crash
 
 ROOT_DIR = Path(__file__).parent
 env_path = ROOT_DIR / '.env'
@@ -44,6 +50,27 @@ def _clean_db_url(url: str) -> str:
 
 DATABASE_URL: str = _clean_db_url(os.environ.get('DATABASE_URL', ''))
 db_pool: asyncpg.Pool = None  # set during startup
+
+# ── Config ──────────────────────────────────────────────────────────────────
+
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
+
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+BACKEND_EXTERNAL_URL = os.environ.get('BACKEND_EXTERNAL_URL', '')
+GCAL_SCOPES = ['https://www.googleapis.com/auth/calendar']
+GCAL_REDIRECT_URI = f"{BACKEND_EXTERNAL_URL}/api/gcal/callback" if BACKEND_EXTERNAL_URL else ''
+
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+
+SUBSCRIPTION_PLANS = {
+    "free": {"name": "Free", "amount": 0.0, "features": ["5 events/month", "Basic calendar views", "1 booking link"]},
+    "pro": {"name": "Pro", "amount": 9.00, "features": ["Unlimited events", "Google Calendar sync", "Custom booking links", "Email notifications", "Priority support"]},
+    "business": {"name": "Business", "amount": 29.00, "features": ["Everything in Pro", "Team workspaces", "Analytics dashboard", "Multi-calendar sharing", "Weekly email digest", "API access"]},
+}
 
 async def _init_conn(conn):
     """Register JSON/JSONB codecs so dicts/lists pass through automatically."""
@@ -82,6 +109,7 @@ CREATE TABLE IF NOT EXISTS events (
     recurrence  JSONB,
     reminder    INTEGER,
     gcal_id     TEXT,
+    team_id     TEXT,
     created_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
@@ -263,6 +291,7 @@ class EventCreate(BaseModel):
     attendees: Optional[List[Dict]] = []
     recurrence: Optional[Dict] = None
     reminder: Optional[int] = None
+    team_id: Optional[str] = None
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -273,6 +302,7 @@ class EventUpdate(BaseModel):
     attendees: Optional[List[Dict]] = None
     recurrence: Optional[Dict] = None
     reminder: Optional[int] = None
+    team_id: Optional[str] = None
 
 class TaskCreate(BaseModel):
     title: str
@@ -483,8 +513,24 @@ async def logout(request: Request, response: Response):
 @api_router.get("/events")
 async def list_events(request: Request):
     user = await get_current_user(request)
+    uid = user["user_id"]
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM events WHERE user_id=$1 ORDER BY start_time", user["user_id"])
+        # Get team IDs user belongs to
+        team_rows = await conn.fetch(
+            "SELECT team_id FROM teams WHERE EXISTS ("
+            "  SELECT 1 FROM jsonb_array_elements(members) m WHERE m->>'user_id' = $1"
+            ")", uid
+        )
+        team_ids = [r["team_id"] for r in team_rows]
+
+        if team_ids:
+            # User's own events + team events
+            rows = await conn.fetch(
+                "SELECT * FROM events WHERE user_id=$1 OR team_id = ANY($2::text[]) ORDER BY start_time",
+                uid, team_ids
+            )
+        else:
+            rows = await conn.fetch("SELECT * FROM events WHERE user_id=$1 ORDER BY start_time", uid)
     return _rows(rows)
 
 @api_router.post("/events")
@@ -494,11 +540,11 @@ async def create_event(data: EventCreate, request: Request):
     now = datetime.now(timezone.utc).isoformat()
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,team_id,created_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
             event_id, user["user_id"], data.title, data.description or "",
             data.start_time, data.end_time, data.color or "indigo",
-            data.attendees or [], data.recurrence, data.reminder, now
+            data.attendees or [], data.recurrence, data.reminder, data.team_id, now
         )
         row = _row(await conn.fetchrow("SELECT * FROM events WHERE event_id=$1", event_id))
     return row
@@ -1211,6 +1257,8 @@ class SubscriptionCheckout(BaseModel):
 
 @api_router.post("/subscribe")
 async def create_subscription(data: SubscriptionCheckout, request: Request):
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(status_code=400, detail="Stripe integration not available")
     user = await get_current_user(request)
     if data.plan_id not in SUBSCRIPTION_PLANS or data.plan_id == "free":
         raise HTTPException(status_code=400, detail="Invalid plan")
@@ -1237,6 +1285,8 @@ async def create_subscription(data: SubscriptionCheckout, request: Request):
 
 @api_router.get("/subscribe/status/{session_id}")
 async def check_subscription_status(session_id: str, request: Request):
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(status_code=400, detail="Stripe integration not available")
     user = await get_current_user(request)
     async with db_pool.acquire() as conn:
         txn = _row(await conn.fetchrow(
@@ -1272,6 +1322,8 @@ async def check_subscription_status(session_id: str, request: Request):
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
+    if not STRIPE_AVAILABLE:
+        return {"received": True}
     body = await request.body()
     sig  = request.headers.get("Stripe-Signature", "")
     try:
@@ -1393,7 +1445,7 @@ async def send_weekly_digest(request: Request):
 async def list_notifications(request: Request):
     """Get user's notifications, ordered by most recent"""
     user = await get_current_user(request)
-    async with (await db_pool).acquire() as conn:
+    async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC",
             user["user_id"]
@@ -1404,7 +1456,7 @@ async def list_notifications(request: Request):
 async def count_unread(request: Request):
     """Get count of unread notifications"""
     user = await get_current_user(request)
-    async with (await db_pool).acquire() as conn:
+    async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT COUNT(*) as count FROM notifications WHERE user_id=$1 AND read=FALSE",
             user["user_id"]
@@ -1415,7 +1467,7 @@ async def count_unread(request: Request):
 async def mark_as_read(notification_id: str, request: Request):
     """Mark notification as read"""
     user = await get_current_user(request)
-    async with (await db_pool).acquire() as conn:
+    async with db_pool.acquire() as conn:
         await conn.execute(
             "UPDATE notifications SET read=TRUE WHERE notification_id=$1 AND user_id=$2",
             notification_id, user["user_id"]
@@ -1426,7 +1478,7 @@ async def mark_as_read(notification_id: str, request: Request):
 async def mark_all_read(request: Request):
     """Mark all notifications as read"""
     user = await get_current_user(request)
-    async with (await db_pool).acquire() as conn:
+    async with db_pool.acquire() as conn:
         await conn.execute(
             "UPDATE notifications SET read=TRUE WHERE user_id=$1",
             user["user_id"]
@@ -1437,7 +1489,7 @@ async def mark_all_read(request: Request):
 async def delete_notification(notification_id: str, request: Request):
     """Delete a notification"""
     user = await get_current_user(request)
-    async with (await db_pool).acquire() as conn:
+    async with db_pool.acquire() as conn:
         await conn.execute(
             "DELETE FROM notifications WHERE notification_id=$1 AND user_id=$2",
             notification_id, user["user_id"]
@@ -1501,6 +1553,14 @@ async def startup():
                 raise
     
     logger.info("Database pool created and schema initialised successfully")
+
+    # Add team_id column if missing (migration for existing databases)
+    async with db_pool.acquire() as conn:
+        try:
+            await conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS team_id TEXT")
+            logger.info("Migration: team_id column ensured on events table")
+        except Exception as e:
+            logger.debug(f"team_id column migration skipped: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
