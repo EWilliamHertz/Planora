@@ -299,6 +299,7 @@ class EventCreate(BaseModel):
     attendees: Optional[List[Dict]] = []
     recurrence: Optional[Dict] = None
     reminder: Optional[int] = None
+    team_id: Optional[str] = None
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -309,6 +310,7 @@ class EventUpdate(BaseModel):
     attendees: Optional[List[Dict]] = None
     recurrence: Optional[Dict] = None
     reminder: Optional[int] = None
+    team_id: Optional[str] = None
 
 class EventInviteRequest(BaseModel):
     guest_email: str
@@ -499,23 +501,75 @@ async def logout(request: Request, response: Response):
 
 @api_router.get("/events")
 async def list_events(request: Request):
+    """Return user's personal events + all team events where user is a member."""
     user = await get_current_user(request)
     async with (await get_pool()).acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM events WHERE user_id=$1 ORDER BY start_time", user["user_id"])
-    return _rows(rows)
+        # Get user's personal events
+        personal_events = await conn.fetch(
+            "SELECT * FROM events WHERE user_id=$1",
+            user["user_id"]
+        )
+        
+        # Get all teams user is a member of
+        teams = await conn.fetch(
+            "SELECT team_id FROM teams WHERE EXISTS ("
+            "  SELECT 1 FROM jsonb_array_elements(members) m WHERE m->>'user_id' = $1"
+            ")",
+            user["user_id"]
+        )
+        
+        team_ids = [t['team_id'] for t in teams]
+        
+        # Get all team events
+        team_events = []
+        if team_ids:
+            # Use ANY for PostgreSQL array matching
+            team_events = await conn.fetch(
+                "SELECT * FROM events WHERE team_id = ANY($1)",
+                team_ids
+            )
+    
+    # Combine and deduplicate by event_id
+    all_events = _rows(personal_events) + _rows(team_events)
+    seen = {}
+    for evt in all_events:
+        if evt['event_id'] not in seen:
+            seen[evt['event_id']] = evt
+    
+    # Sort by start_time
+    result = list(seen.values())
+    result.sort(key=lambda e: e.get('start_time', '') or '')
+    return result
 
 @api_router.post("/events")
 async def create_event(data: EventCreate, request: Request):
+    """Create an event. If team_id is provided, validate user is a team member."""
     user = await get_current_user(request)
     event_id = f"evt_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Validate team membership if team_id provided
+    if data.team_id:
+        async with (await get_pool()).acquire() as conn:
+            team = _row(await conn.fetchrow(
+                "SELECT * FROM teams WHERE team_id=$1",
+                data.team_id
+            ))
+            if not team:
+                raise HTTPException(status_code=404, detail="Team not found")
+            
+            # Check if user is a member
+            members = team.get("members") or []
+            if not any(m["user_id"] == user["user_id"] for m in members):
+                raise HTTPException(status_code=403, detail="You are not a member of this team")
+    
     async with (await get_pool()).acquire() as conn:
         await conn.execute(
-            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,team_id,created_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
             event_id, user["user_id"], data.title, data.description or "",
             data.start_time, data.end_time, data.color or "indigo",
-            data.attendees or [], data.recurrence, data.reminder, now
+            data.attendees or [], data.recurrence, data.reminder, data.team_id, now
         )
         row = _row(await conn.fetchrow("SELECT * FROM events WHERE event_id=$1", event_id))
     return row

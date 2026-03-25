@@ -46,6 +46,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [color, setColor] = useState("indigo");
+  const [teamId, setTeamId] = useState(null);
+  const [userTeams, setUserTeams] = useState([]);
   const [attendees, setAttendees] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
@@ -57,7 +59,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [inviteError, setInviteError] = useState(null);
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  // Fetch available users from backend (team members + contacts)
+  // Fetch available users and teams from backend
   useEffect(() => {
     const fetchAvailableUsers = async () => {
       try {
@@ -77,8 +79,24 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       }
     };
 
+    const fetchUserTeams = async () => {
+      try {
+        const response = await authFetch("/api/teams", {
+          method: "GET",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setUserTeams(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch teams:", error);
+        setUserTeams([]);
+      }
+    };
+
     if (open) {
       fetchAvailableUsers();
+      fetchUserTeams();
     }
   }, [open, authFetch]);
 
@@ -105,6 +123,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       d.setHours((hours || 9) + 1);
       setEndTime(format(d, "yyyy-MM-dd'T'HH:mm"));
       setColor("indigo");
+      setTeamId(null);
       setAttendees([]);
       setRecurrenceType("none");
       setRecurrenceEnd("");
@@ -137,6 +156,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
         attendees,
         recurrence,
         reminder: reminder !== "none" ? parseInt(reminder) : null,
+        team_id: teamId,
       };
 
       const targetId = event?.original_event_id || event?.event_id;
@@ -219,12 +239,18 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
         <DialogHeader>
           <div className="flex items-center gap-2">
             <DialogTitle>{event ? "Edit Event" : "Create Event"}</DialogTitle>
-            {isSharedEvent && (
-              <Badge variant="outline" className="ml-auto">
-                <Users className="h-3 w-3 mr-1" />
-                Shared Event
-              </Badge>
-            )}
+            {teamId && (
+            <Badge variant="outline" className="ml-auto">
+              <Users className="h-3 w-3 mr-1" />
+              Team Event
+            </Badge>
+          )}
+          {isSharedEvent && !teamId && (
+            <Badge variant="outline" className="ml-auto">
+              <Users className="h-3 w-3 mr-1" />
+              Shared Event
+            </Badge>
+          )}
           </div>
           <DialogDescription>
             {event ? "Update event details" : "Add a new event to your calendar"}
@@ -309,6 +335,28 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
               ))}
             </div>
           </div>
+
+          {/* Team Selection */}
+          {userTeams.length > 0 && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5" /> Team
+              </Label>
+              <Select value={teamId || "personal"} onValueChange={(value) => setTeamId(value === "personal" ? null : value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a team or personal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal (No Team)</SelectItem>
+                  {userTeams.map((team) => (
+                    <SelectItem key={team.team_id} value={team.team_id}>
+                      {team.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Recurrence */}
           <div className="space-y-2">
