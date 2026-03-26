@@ -200,10 +200,10 @@ export default function DashboardPage() {
 
   const goToToday = () => setCurrentDate(new Date());
 
-  // Expand recurring events for current view range
+  // Expand recurring events for current view range + 2 months ahead for sidebar
   const displayEvents = useMemo(() => {
     const viewStart = subMonths(startOfMonth(currentDate), 1);
-    const viewEnd = addMonths(endOfMonth(currentDate), 1);
+    const viewEnd = addMonths(endOfMonth(currentDate), 2); // extended to +2 months for sidebar upcoming
     const expanded = [];
 
     events.forEach((event) => {
@@ -414,7 +414,7 @@ export default function DashboardPage() {
         <div className="hidden lg:block w-80 border-l border-border bg-card">
           <TaskSidebar
             tasks={tasks}
-            events={events}
+            events={displayEvents}
             onToggleTask={(taskId, completed) => handleUpdateTask(taskId, { completed })}
             onTaskClick={handleTaskClick}
             onDeleteTask={handleDeleteTask}
