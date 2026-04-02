@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS events (
     reminder    INTEGER,
     gcal_id     TEXT,
     team_id     TEXT,
+    exceptions  JSONB DEFAULT '{}'::jsonb,
     created_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
@@ -548,11 +549,11 @@ async def create_event(data: EventCreate, request: Request):
     now = datetime.now(timezone.utc).isoformat()
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,team_id,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,recurrence,reminder,team_id,exceptions,created_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
             event_id, user["user_id"], data.title, data.description or "",
             data.start_time, data.end_time, data.color or "indigo",
-            data.attendees or [], data.recurrence, data.reminder, data.team_id, now
+            data.attendees or [], data.recurrence, data.reminder, data.team_id, {}, now
         )
         row = _row(await conn.fetchrow("SELECT * FROM events WHERE event_id=$1", event_id))
     return row
@@ -571,6 +572,57 @@ async def update_event(event_id: str, data: EventUpdate, request: Request):
         )
         if result == "UPDATE 0":
             raise HTTPException(status_code=404, detail="Event not found")
+        return _row(await conn.fetchrow("SELECT * FROM events WHERE event_id=$1", event_id))
+
+@api_router.put("/events/{event_id}/instance")
+async def update_event_instance(event_id: str, instance_date: str, data: EventUpdate, request: Request, edit_scope: str = "this"):
+    """
+    Update a specific instance of a recurring event.
+    
+    edit_scope can be:
+    - "this": Edit only this instance (creates exception)
+    - "all": Edit all instances (update base event)
+    
+    Usage: PUT /events/{event_id}/instance?instance_date=2026-04-05&edit_scope=this
+    """
+    user = await get_current_user(request)
+    update_fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    async with db_pool.acquire() as conn:
+        event = _row(await conn.fetchrow(
+            "SELECT * FROM events WHERE event_id=$1 AND user_id=$2", 
+            event_id, user["user_id"]
+        ))
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        if not event.get("recurrence") or event["recurrence"].get("type") == "none":
+            # Not a recurring event, just update normally
+            set_clause, values = _build_update(update_fields, start_idx=2)
+            await conn.execute(
+                f"UPDATE events SET {set_clause} WHERE event_id=$1 AND user_id=${len(values)+2}",
+                event_id, *values, user["user_id"]
+            )
+        else:
+            # Recurring event
+            if edit_scope == "all":
+                # Update the base recurring event
+                set_clause, values = _build_update(update_fields, start_idx=2)
+                await conn.execute(
+                    f"UPDATE events SET {set_clause} WHERE event_id=$1 AND user_id=${len(values)+2}",
+                    event_id, *values, user["user_id"]
+                )
+            else:  # edit_scope == "this"
+                # Store exception for this specific instance
+                exceptions = event.get("exceptions") or {}
+                exceptions[instance_date] = update_fields
+                await conn.execute(
+                    "UPDATE events SET exceptions=$1 WHERE event_id=$2",
+                    exceptions, event_id
+                )
+        
         return _row(await conn.fetchrow("SELECT * FROM events WHERE event_id=$1", event_id))
 
 @api_router.delete("/events/{event_id}")
@@ -830,13 +882,13 @@ async def create_booking(data: BookingCreate):
             data.start_time, data.end_time, data.duration, now
         )
         await conn.execute(
-            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,created_at) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,exceptions,created_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
             f"evt_{uuid.uuid4().hex[:12]}", data.host_user_id,
             f"Meeting with {data.guest_name}",
             f"Booked by {data.guest_name} ({data.guest_email})",
             data.start_time, data.end_time, "emerald",
-            [{"name": data.guest_name, "email": data.guest_email, "status": "accepted"}], now
+            [{"name": data.guest_name, "email": data.guest_email, "status": "accepted"}], {}, now
         )
         host = _row(await conn.fetchrow("SELECT name FROM users WHERE user_id=$1", data.host_user_id))
 
@@ -992,12 +1044,12 @@ async def gcal_sync(request: Request):
                         attendees.append({"name": att.get('displayName', att.get('email', '')),
                                           "email": att.get('email', ''), "status": status})
                     await conn.execute(
-                        "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,gcal_id,created_at) "
-                        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                        "INSERT INTO events (event_id,user_id,title,description,start_time,end_time,color,attendees,gcal_id,exceptions,created_at) "
+                        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
                         f"evt_{uuid.uuid4().hex[:12]}", user["user_id"],
                         gcal_event.get('summary', 'Untitled'),
                         gcal_event.get('description', ''),
-                        start_time, end_time, "violet", attendees, gcal_id, now.isoformat()
+                        start_time, end_time, "violet", attendees, gcal_id, {}, now.isoformat()
                     )
                     imported += 1
 
@@ -1560,6 +1612,13 @@ async def startup():
             logger.info("Migration: team_id column ensured on events table")
         except Exception as e:
             logger.debug(f"team_id column migration skipped: {e}")
+        
+        # Add exceptions column if missing
+        try:
+            await conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS exceptions JSONB DEFAULT '{}'::jsonb")
+            logger.info("Migration: exceptions column ensured on events table")
+        except Exception as e:
+            logger.debug(f"exceptions column migration skipped: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
