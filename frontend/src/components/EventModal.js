@@ -24,6 +24,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { EditRecurringDialog } from "./EditRecurringDialog";
+import { DeleteRecurringDialog } from "./DeleteRecurringDialog";
 
 const COLORS = [
   { value: "indigo", label: "Indigo", className: "bg-indigo-500" },
@@ -71,6 +72,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [inviteLoading, setInviteLoading] = useState(false);
   const [showRecurringDialog, setShowRecurringDialog] = useState(false);
   const [pendingData, setPendingData] = useState(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   // Fetch available users and teams from backend
   useEffect(() => {
@@ -265,6 +267,33 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       console.error("Error updating recurring event:", error);
       setInviteError("Failed to update event");
     }
+  };
+
+  const handleDeleteClick = () => {
+    // Check if this is a recurring event instance
+    if (event.is_recurring_instance || (event.recurrence && event.recurrence.type !== "none")) {
+      setShowDeleteDialog(true);
+    } else {
+      // Non-recurring event, delete directly
+      onDelete(event.event_id);
+      onClose();
+    }
+  };
+
+  const handleDeleteRecurringChoice = (scope) => {
+    const targetId = event.original_event_id || event.event_id;
+    
+    if (scope === "all") {
+      // Delete entire series
+      onDelete(targetId);
+    } else {
+      // Delete only this instance - call backend with instance date
+      const instanceDate = event.start_time.split("T")[0]; // Extract date part
+      onDelete(targetId, { instanceDate, scope: "this" });
+    }
+    
+    setShowDeleteDialog(false);
+    onClose();
   };
 
   const addAttendee = (user) => {
@@ -566,10 +595,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                 data-testid="event-delete-btn"
                 variant="destructive"
                 size="sm"
-                onClick={() => {
-                  onDelete(event.event_id);
-                  onClose();
-                }}
+                onClick={handleDeleteClick}
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
               </Button>
@@ -609,6 +635,15 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
           setPendingData(null);
         }}
         onSelect={handleRecurringChoice}
+        eventTitle={title}
+        eventDate={event?.start_time ? new Date(event.start_time).toLocaleDateString() : ""}
+      />
+
+      {/* Recurring Event Delete Dialog */}
+      <DeleteRecurringDialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onSelect={handleDeleteRecurringChoice}
         eventTitle={title}
         eventDate={event?.start_time ? new Date(event.start_time).toLocaleDateString() : ""}
       />
