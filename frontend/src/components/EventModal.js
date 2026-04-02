@@ -23,6 +23,7 @@ import { Trash2, X, Search, Users, Repeat, Bell, Mail, AlertCircle } from "lucid
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { EditRecurringDialog } from "./EditRecurringDialog";
 
 const COLORS = [
   { value: "indigo", label: "Indigo", className: "bg-indigo-500" },
@@ -68,11 +69,13 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const [inviteSent, setInviteSent] = useState(false);
   const [inviteError, setInviteError] = useState(null);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [showRecurringDialog, setShowRecurringDialog] = useState(false);
+  const [pendingData, setPendingData] = useState(null);
 
   // Fetch available users and teams from backend
   useEffect(() => {
     const fetchAvailableUsers = async () => {
-      try {
+      try:
         // Build URL with search param if searchQuery is present
         const url = searchQuery 
           ? `/api/users/available?search=${encodeURIComponent(searchQuery)}`
@@ -176,6 +179,14 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       const targetId = event?.original_event_id || event?.event_id;
       
       if (event) {
+        // Check if this is a recurring event and we're editing an instance
+        if (event.recurrence && event.recurrence.type !== "none") {
+          // Store pending data and show dialog
+          setPendingData({ data, targetId, isRecurring: true });
+          setShowRecurringDialog(true);
+          setInviteLoading(false);
+          return;
+        }
         onUpdate(targetId, data);
       } else {
         const result = onCreate(data);
@@ -223,6 +234,39 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
     }
   };
 
+  const handleRecurringChoice = async (scope) => {
+    if (!pendingData) return;
+
+    try {
+      if (scope === "all") {
+        // Update all instances
+        onUpdate(pendingData.targetId, pendingData.data);
+      } else {
+        // Update only this instance - call /instance endpoint
+        const instanceDate = event.start_time.split("T")[0]; // Extract date part
+        const response = await authFetch(
+          `/api/events/${pendingData.targetId}/instance?instance_date=${instanceDate}&edit_scope=this`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(pendingData.data),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to update event instance");
+        }
+      }
+
+      setShowRecurringDialog(false);
+      setPendingData(null);
+      onClose();
+    } catch (error) {
+      console.error("Error updating recurring event:", error);
+      setInviteError("Failed to update event");
+    }
+  };
+
   const addAttendee = (user) => {
     if (!attendees.find(a => a.email === user.email)) {
       setAttendees((prev) => [
@@ -248,312 +292,326 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   const isSharedEvent = attendees.length > 0;
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" data-testid="event-modal">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <DialogTitle>{event ? "Edit Event" : "Create Event"}</DialogTitle>
-            {teamId && (
-            <Badge variant="outline" className="ml-auto">
-              <Users className="h-3 w-3 mr-1" />
-              Team Event
-            </Badge>
+    <>
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto" data-testid="event-modal">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <DialogTitle>{event ? "Edit Event" : "Create Event"}</DialogTitle>
+              {teamId && (
+              <Badge variant="outline" className="ml-auto">
+                <Users className="h-3 w-3 mr-1" />
+                Team Event
+              </Badge>
+            )}
+            {isSharedEvent && !teamId && (
+              <Badge variant="outline" className="ml-auto">
+                <Users className="h-3 w-3 mr-1" />
+                Shared Event
+              </Badge>
+            )}
+            </div>
+            <DialogDescription>
+              {event ? "Update event details" : "Add a new event to your calendar"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Invite Feedback Messages */}
+          {inviteSent && (
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+              <Mail className="h-4 w-4" />
+              <span className="text-sm">
+                ✓ Emails sent to {attendees.length} {attendees.length === 1 ? "person" : "people"}
+              </span>
+            </div>
           )}
-          {isSharedEvent && !teamId && (
-            <Badge variant="outline" className="ml-auto">
-              <Users className="h-3 w-3 mr-1" />
-              Shared Event
-            </Badge>
+
+          {inviteError && (
+            <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg p-3 flex items-center gap-2 text-rose-700 dark:text-rose-300">
+              <AlertCircle className="h-4 w-4" />
+              <span className="text-sm">{inviteError}</span>
+            </div>
           )}
-          </div>
-          <DialogDescription>
-            {event ? "Update event details" : "Add a new event to your calendar"}
-          </DialogDescription>
-        </DialogHeader>
 
-        {/* Invite Feedback Messages */}
-        {inviteSent && (
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-            <Mail className="h-4 w-4" />
-            <span className="text-sm">
-              ✓ Emails sent to {attendees.length} {attendees.length === 1 ? "person" : "people"}
-            </span>
-          </div>
-        )}
-
-        {inviteError && (
-          <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg p-3 flex items-center gap-2 text-rose-700 dark:text-rose-300">
-            <AlertCircle className="h-4 w-4" />
-            <span className="text-sm">{inviteError}</span>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="event-title">Title</Label>
-            <Input
-              data-testid="event-title-input"
-              id="event-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Event title"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="event-desc">Description</Label>
-            <Input
-              data-testid="event-desc-input"
-              id="event-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Start</Label>
+              <Label htmlFor="event-title">Title</Label>
               <Input
-                data-testid="event-start-input"
-                type="datetime-local"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                data-testid="event-title-input"
+                id="event-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Event title"
               />
             </div>
+
             <div className="space-y-2">
-              <Label>End</Label>
+              <Label htmlFor="event-desc">Description</Label>
               <Input
-                data-testid="event-end-input"
-                type="datetime-local"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                data-testid="event-desc-input"
+                id="event-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional description"
               />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label>Color</Label>
-            <div className="flex gap-2">
-              {COLORS.map((c) => (
-                <button
-                  key={c.value}
-                  data-testid={`event-color-${c.value}`}
-                  className={cn(
-                    "h-7 w-7 rounded-full transition-transform",
-                    c.className,
-                    color === c.value ? "ring-2 ring-offset-2 ring-offset-background ring-primary scale-110" : "hover:scale-105"
-                  )}
-                  onClick={() => setColor(c.value)}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Start</Label>
+                <Input
+                  data-testid="event-start-input"
+                  type="datetime-local"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>End</Label>
+                <Input
+                  data-testid="event-end-input"
+                  type="datetime-local"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Color</Label>
+              <div className="flex gap-2">
+                {COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    data-testid={`event-color-${c.value}`}
+                    className={cn(
+                      "h-7 w-7 rounded-full transition-transform",
+                      c.className,
+                      color === c.value ? "ring-2 ring-offset-2 ring-offset-background ring-primary scale-110" : "hover:scale-105"
+                    )}
+                    onClick={() => setColor(c.value)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Team Selection */}
+            {userTeams.length > 0 && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> Team
+                </Label>
+                <Select value={teamId || "personal"} onValueChange={(value) => setTeamId(value === "personal" ? null : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a team or personal" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="personal">Personal (No Team)</SelectItem>
+                    {userTeams.map((team) => (
+                      <SelectItem key={team.team_id} value={team.team_id}>
+                        {team.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Recurrence */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Repeat className="h-3.5 w-3.5" /> Repeat
+              </Label>
+              <Select value={recurrenceType} onValueChange={setRecurrenceType}>
+                <SelectTrigger data-testid="event-recurrence-select">
+                  <SelectValue placeholder="Does not repeat" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Does not repeat</SelectItem>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              {recurrenceType !== "none" && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Ends on (optional)</Label>
+                  <Input
+                    data-testid="event-recurrence-end-input"
+                    type="date"
+                    value={recurrenceEnd}
+                    onChange={(e) => setRecurrenceEnd(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Invite People */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5" /> Invite People
+              </Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  data-testid="event-invite-input"
+                  className="pl-9"
+                  placeholder="Search by name or email..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setShowSearch(true);
+                  }}
+                  onFocus={() => setShowSearch(true)}
+                />
+                {showSearch && searchQuery && filteredUsers.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 bg-popover border border-border rounded-lg shadow-lg mt-1 z-20 overflow-hidden">
+                    {filteredUsers.map((user) => (
+                      <div
+                        key={user.email}
+                        data-testid={`invite-option-${user.email}`}
+                        className="px-3 py-2.5 hover:bg-accent cursor-pointer flex items-center gap-2.5 transition-colors"
+                        onClick={() => addAttendee(user)}
+                      >
+                        <Avatar className="h-7 w-7">
+                          <AvatarImage src={user.avatar} className="object-cover" />
+                          <AvatarFallback className="text-xs">{user.name?.[0] || "?"}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="text-sm font-medium">{user.name}</div>
+                          <div className="text-xs text-muted-foreground">{user.email}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {showSearch && searchQuery && filteredUsers.length === 0 && (
+                  <div className="absolute top-full left-0 right-0 bg-popover border border-border rounded-lg shadow-lg mt-1 z-20 p-3 text-center text-xs text-muted-foreground">
+                    No users found. Email will still be sent to this address.
+                  </div>
+                )}
+              </div>
+
+              {attendees.length > 0 && (
+                <div className="space-y-2 mt-2">
+                  {attendees.map((att) => (
+                    <div
+                      key={att.email}
+                      data-testid={`attendee-${att.email}`}
+                      className="flex items-center gap-2.5 p-2 rounded-lg bg-muted/50"
+                    >
+                      <Avatar className="h-7 w-7">
+                        <AvatarImage src={att.avatar} className="object-cover" />
+                        <AvatarFallback className="text-xs">{att.name?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{att.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{att.email}</div>
+                      </div>
+                      <Badge
+                        className={cn("text-[10px] px-1.5 py-0 border-0", STATUS_STYLES[att.status] || STATUS_STYLES.pending)}
+                      >
+                        {att.status}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => removeAttendee(att.email)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Reminder */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-muted-foreground" />
+              <Label>Reminder</Label>
+            </div>
+            <div className="flex gap-2 flex-wrap" data-testid="event-reminder-selector">
+              {[
+                { value: "none", label: "None" },
+                { value: "5", label: "5 min" },
+                { value: "15", label: "15 min" },
+                { value: "30", label: "30 min" },
+                { value: "60", label: "1 hour" },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  data-testid={`reminder-${opt.value}`}
+                  type="button"
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                    reminder === opt.value
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-accent/50"
+                  )}
+                  onClick={() => setReminder(opt.value)}
+                >
+                  {opt.label}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Team Selection */}
-          {userTeams.length > 0 && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5" /> Team
-              </Label>
-              <Select value={teamId || "personal"} onValueChange={(value) => setTeamId(value === "personal" ? null : value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a team or personal" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">Personal (No Team)</SelectItem>
-                  {userTeams.map((team) => (
-                    <SelectItem key={team.team_id} value={team.team_id}>
-                      {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Recurrence */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5">
-              <Repeat className="h-3.5 w-3.5" /> Repeat
-            </Label>
-            <Select value={recurrenceType} onValueChange={setRecurrenceType}>
-              <SelectTrigger data-testid="event-recurrence-select">
-                <SelectValue placeholder="Does not repeat" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Does not repeat</SelectItem>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-              </SelectContent>
-            </Select>
-            {recurrenceType !== "none" && (
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Ends on (optional)</Label>
-                <Input
-                  data-testid="event-recurrence-end-input"
-                  type="date"
-                  value={recurrenceEnd}
-                  onChange={(e) => setRecurrenceEnd(e.target.value)}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Invite People */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5">
-              <Users className="h-3.5 w-3.5" /> Invite People
-            </Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                data-testid="event-invite-input"
-                className="pl-9"
-                placeholder="Search by name or email..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setShowSearch(true);
+          <DialogFooter className="flex-row gap-2 sm:justify-between">
+            {event && (
+              <Button
+                data-testid="event-delete-btn"
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  onDelete(event.event_id);
+                  onClose();
                 }}
-                onFocus={() => setShowSearch(true)}
-              />
-              {showSearch && searchQuery && filteredUsers.length > 0 && (
-                <div className="absolute top-full left-0 right-0 bg-popover border border-border rounded-lg shadow-lg mt-1 z-20 overflow-hidden">
-                  {filteredUsers.map((user) => (
-                    <div
-                      key={user.email}
-                      data-testid={`invite-option-${user.email}`}
-                      className="px-3 py-2.5 hover:bg-accent cursor-pointer flex items-center gap-2.5 transition-colors"
-                      onClick={() => addAttendee(user)}
-                    >
-                      <Avatar className="h-7 w-7">
-                        <AvatarImage src={user.avatar} className="object-cover" />
-                        <AvatarFallback className="text-xs">{user.name?.[0] || "?"}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="text-sm font-medium">{user.name}</div>
-                        <div className="text-xs text-muted-foreground">{user.email}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {showSearch && searchQuery && filteredUsers.length === 0 && (
-                <div className="absolute top-full left-0 right-0 bg-popover border border-border rounded-lg shadow-lg mt-1 z-20 p-3 text-center text-xs text-muted-foreground">
-                  No users found. Email will still be sent to this address.
-                </div>
-              )}
-            </div>
-
-            {attendees.length > 0 && (
-              <div className="space-y-2 mt-2">
-                {attendees.map((att) => (
-                  <div
-                    key={att.email}
-                    data-testid={`attendee-${att.email}`}
-                    className="flex items-center gap-2.5 p-2 rounded-lg bg-muted/50"
-                  >
-                    <Avatar className="h-7 w-7">
-                      <AvatarImage src={att.avatar} className="object-cover" />
-                      <AvatarFallback className="text-xs">{att.name?.[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{att.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">{att.email}</div>
-                    </div>
-                    <Badge
-                      className={cn("text-[10px] px-1.5 py-0 border-0", STATUS_STYLES[att.status] || STATUS_STYLES.pending)}
-                    >
-                      {att.status}
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => removeAttendee(att.email)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Reminder */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Bell className="h-4 w-4 text-muted-foreground" />
-            <Label>Reminder</Label>
-          </div>
-          <div className="flex gap-2 flex-wrap" data-testid="event-reminder-selector">
-            {[
-              { value: "none", label: "None" },
-              { value: "5", label: "5 min" },
-              { value: "15", label: "15 min" },
-              { value: "30", label: "30 min" },
-              { value: "60", label: "1 hour" },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                data-testid={`reminder-${opt.value}`}
-                type="button"
-                className={cn(
-                  "px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
-                  reminder === opt.value
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground hover:bg-accent/50"
-                )}
-                onClick={() => setReminder(opt.value)}
               >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+                <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+              </Button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <Button data-testid="event-cancel-btn" variant="outline" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                data-testid="event-save-btn"
+                size="sm"
+                onClick={handleSubmit}
+                disabled={!title.trim() || inviteLoading}
+                className="relative"
+              >
+                {inviteLoading ? (
+                  <>
+                    <span className="opacity-0">{event ? "Update" : "Create"} Event</span>
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="animate-spin">⏳</span>
+                    </span>
+                  </>
+                ) : (
+                  `${event ? "Update" : "Create"} Event`
+                )}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        <DialogFooter className="flex-row gap-2 sm:justify-between">
-          {event && (
-            <Button
-              data-testid="event-delete-btn"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                onDelete(event.event_id);
-                onClose();
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-            </Button>
-          )}
-          <div className="flex gap-2 ml-auto">
-            <Button data-testid="event-cancel-btn" variant="outline" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              data-testid="event-save-btn"
-              size="sm"
-              onClick={handleSubmit}
-              disabled={!title.trim() || inviteLoading}
-              className="relative"
-            >
-              {inviteLoading ? (
-                <>
-                  <span className="opacity-0">{event ? "Update" : "Create"} Event</span>
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    <span className="animate-spin">⏳</span>
-                  </span>
-                </>
-              ) : (
-                `${event ? "Update" : "Create"} Event`
-              )}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Recurring Event Edit Dialog */}
+      <EditRecurringDialog
+        open={showRecurringDialog}
+        onClose={() => {
+          setShowRecurringDialog(false);
+          setPendingData(null);
+        }}
+        onSelect={handleRecurringChoice}
+        eventTitle={title}
+        eventDate={event?.start_time ? new Date(event.start_time).toLocaleDateString() : ""}
+      />
+    </>
   );
 }
