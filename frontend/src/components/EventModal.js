@@ -179,10 +179,12 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       const targetId = event?.original_event_id || event?.event_id;
       
       if (event) {
-        // Check if this is a recurring event and we're editing an instance
-        if (event.recurrence && event.recurrence.type !== "none") {
-          // Store pending data and show dialog
-          setPendingData({ data, targetId, isRecurring: true });
+        // Check if this is a recurring event OR an instance of a recurring event
+        const isRecurring = (event.recurrence && event.recurrence.type !== "none") || event.original_event_id;
+        
+        if (isRecurring) {
+          // Store pending data and show dialog with an explicit action
+          setPendingData({ action: "edit", data, targetId, isRecurring: true });
           setShowRecurringDialog(true);
           setInviteLoading(false);
           return;
@@ -238,10 +240,47 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
     if (!pendingData) return;
 
     try {
-      if (scope === "all") {
-        // Update all instances
-        onUpdate(pendingData.targetId, pendingData.data);
+      if (pendingData.action === "delete") {
+        if (scope === "all") {
+          // Delete the parent event (all instances)
+          onDelete(pendingData.targetId);
+        } else {
+          // Delete only this instance via the instance endpoint
+          const instanceDate = event.start_time.split("T")[0];
+          const response = await authFetch(
+            `/api/events/${pendingData.targetId}/instance?instance_date=${instanceDate}`,
+            { method: "DELETE" }
+          );
+          if (!response.ok) throw new Error("Failed to delete event instance");
+          onDelete(event.event_id); // Trigger local UI update
+        }
       } else {
+        // action === "edit"
+        if (scope === "all") {
+          onUpdate(pendingData.targetId, pendingData.data);
+        } else {
+          // Update only this instance
+          const instanceDate = event.start_time.split("T")[0];
+          const response = await authFetch(
+            `/api/events/${pendingData.targetId}/instance?instance_date=${instanceDate}&edit_scope=this`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(pendingData.data),
+            }
+          );
+          if (!response.ok) throw new Error("Failed to update event instance");
+        }
+      }
+
+      setShowRecurringDialog(false);
+      setPendingData(null);
+      onClose();
+    } catch (error) {
+      console.error(`Error processing recurring event:`, error);
+      setInviteError(`Failed to ${pendingData.action} event`);
+    }
+  };
         // Update only this instance - call /instance endpoint
         const instanceDate = event.start_time.split("T")[0]; // Extract date part
         const response = await authFetch(
@@ -567,8 +606,15 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
                 variant="destructive"
                 size="sm"
                 onClick={() => {
-                  onDelete(event.event_id);
-                  onClose();
+                  const isRecurring = (event.recurrence && event.recurrence.type !== "none") || event.original_event_id;
+                  if (isRecurring) {
+                    const targetId = event.original_event_id || event.event_id;
+                    setPendingData({ action: "delete", data: null, targetId, isRecurring: true });
+                    setShowRecurringDialog(true);
+                  } else {
+                    onDelete(event.event_id);
+                    onClose();
+                  }
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
