@@ -75,7 +75,7 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
   // Fetch available users and teams from backend
   useEffect(() => {
     const fetchAvailableUsers = async () => {
-      try:
+      try {
         // Build URL with search param if searchQuery is present
         const url = searchQuery 
           ? `/api/users/available?search=${encodeURIComponent(searchQuery)}`
