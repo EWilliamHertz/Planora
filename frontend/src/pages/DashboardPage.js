@@ -125,14 +125,31 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDeleteEvent = async (eventId) => {
+  const handleDeleteEvent = async (eventId, options = {}) => {
     try {
-      const res = await authFetch(`${API_URL}/api/events/${eventId}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        setEvents((prev) => prev.filter((e) => e.event_id !== eventId));
-        toast.success("Event deleted");
+      let url = `${API_URL}/api/events/${eventId}`;
+      
+      // If this is a recurring instance deletion, use the instance endpoint
+      if (options.instanceDate && options.scope === "this") {
+        url = `${API_URL}/api/events/${eventId}/instance?instance_date=${options.instanceDate}&delete_scope=this`;
+        const res = await authFetch(url, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          // Refetch events to get updated exceptions
+          const eventsRes = await authFetch(`${API_URL}/api/events`);
+          if (eventsRes.ok) setEvents(await eventsRes.json());
+          toast.success("Event instance deleted");
+        }
+      } else {
+        // Delete entire event (or all instances of recurring event)
+        const res = await authFetch(url, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          setEvents((prev) => prev.filter((e) => e.event_id !== eventId));
+          toast.success("Event deleted");
+        }
       }
     } catch (e) {
       toast.error("Failed to delete event");
