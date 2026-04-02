@@ -39,6 +39,16 @@ const STATUS_STYLES = {
   declined: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
 };
 
+// Helper to convert local datetime to UTC ISO string, accounting for timezone offset
+function localToUTCISO(localDateTimeStr) {
+  if (!localDateTimeStr) return null;
+  const dt = new Date(localDateTimeStr);
+  const offset = dt.getTimezoneOffset(); // in minutes
+  // Subtract the offset to get UTC time
+  const utcTime = new Date(dt.getTime() - offset * 60000);
+  return utcTime.toISOString();
+}
+
 export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpdate, onDelete }) {
   const { authFetch } = useAuth();
   const [title, setTitle] = useState("");
@@ -154,8 +164,8 @@ export function EventModal({ open, onClose, event, selectedDate, onCreate, onUpd
       const data = {
         title: title.trim(),
         description,
-        start_time: new Date(startTime).toISOString(),
-        end_time: new Date(endTime).toISOString(),
+        start_time: localToUTCISO(startTime),
+        end_time: localToUTCISO(endTime),
         color,
         attendees,
         recurrence,
