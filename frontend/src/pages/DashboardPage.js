@@ -39,8 +39,17 @@ import {
   isValid,
 } from "date-fns";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const CATEGORIES = ["All", "Work", "Personal", "Urgent", "Health", "Finance"];
+const CATEGORY_COLORS = {
+  Work: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200",
+  Personal: "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200",
+  Urgent: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200",
+  Health: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200",
+  Finance: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200",
+};
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -59,6 +68,7 @@ export default function DashboardPage() {
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem("planora_onboarded");
   });
+  const [selectedCategories, setSelectedCategories] = useState(new Set(["Work", "Personal", "Urgent", "Health", "Finance"]));
 
   // Replaced WebSockets with HTTP Polling for Vercel
   useEffect(() => {
@@ -244,6 +254,35 @@ export default function DashboardPage() {
     return expanded;
   }, [events, currentDate]);
 
+  // Filter events by selected categories
+  const filteredEvents = useMemo(() => {
+    return displayEvents.filter(event => {
+      const category = event.category || "Personal";
+      return selectedCategories.has(category);
+    });
+  }, [displayEvents, selectedCategories]);
+
+  const handleCategoryToggle = (category) => {
+    if (category === "All") {
+      // Toggle all on/off
+      const activeCategories = CATEGORIES.filter(c => c !== "All");
+      if (selectedCategories.size === activeCategories.length) {
+        setSelectedCategories(new Set());
+      } else {
+        setSelectedCategories(new Set(activeCategories));
+      }
+    } else {
+      // Toggle individual category
+      const updated = new Set(selectedCategories);
+      if (updated.has(category)) {
+        updated.delete(category);
+      } else {
+        updated.add(category);
+      }
+      setSelectedCategories(updated);
+    }
+  };
+
   // Drag-and-drop reschedule handler
   const handleEventDrop = async (eventId, newTimes) => {
     await handleUpdateEvent(eventId, newTimes);
@@ -307,6 +346,8 @@ export default function DashboardPage() {
     );
   }
 
+  const allCategoriesSelected = CATEGORIES.filter(c => c !== "All").every(c => selectedCategories.has(c));
+
   return (
     <div className="flex h-full" data-testid="dashboard-page">
       {/* Main Calendar Area */}
@@ -363,6 +404,27 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Category Filters */}
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-border bg-background/50 flex-wrap">
+          {CATEGORIES.map((category) => {
+            const isSelected = category === "All" ? allCategoriesSelected : selectedCategories.has(category);
+            return (
+              <Button
+                key={category}
+                variant={isSelected ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "h-7 text-xs font-medium px-3 transition-colors",
+                  isSelected && category !== "All" && CATEGORY_COLORS[category]
+                )}
+                onClick={() => handleCategoryToggle(category)}
+              >
+                {category}
+              </Button>
+            );
+          })}
+        </div>
+
         {/* Calendar / Kanban */}
         <div className="flex-1 overflow-auto p-4 sm:p-6">
           {calendarView === "kanban" ? (
@@ -377,7 +439,7 @@ export default function DashboardPage() {
               {calendarView === "month" && (
                 <CalendarMonthView
                   currentDate={currentDate}
-                  events={displayEvents}
+                  events={filteredEvents}
                   tasks={tasks}
                   onDayClick={handleDayClick}
                   onEventClick={handleEventClick}
@@ -387,7 +449,7 @@ export default function DashboardPage() {
               {calendarView === "week" && (
                 <CalendarWeekView
                   currentDate={currentDate}
-                  events={displayEvents}
+                  events={filteredEvents}
                   tasks={tasks}
                   onTimeSlotClick={handleTimeSlotClick}
                   onEventClick={handleEventClick}
@@ -397,7 +459,7 @@ export default function DashboardPage() {
               {calendarView === "day" && (
                 <CalendarDayView
                   currentDate={currentDate}
-                  events={displayEvents}
+                  events={filteredEvents}
                   tasks={tasks}
                   onTimeSlotClick={handleTimeSlotClick}
                   onEventClick={handleEventClick}
@@ -414,7 +476,7 @@ export default function DashboardPage() {
         <div className="hidden lg:block w-80 border-l border-border bg-card">
           <TaskSidebar
             tasks={tasks}
-            events={displayEvents}
+            events={filteredEvents}
             onToggleTask={(taskId, completed) => handleUpdateTask(taskId, { completed })}
             onTaskClick={handleTaskClick}
             onDeleteTask={handleDeleteTask}
@@ -443,7 +505,7 @@ export default function DashboardPage() {
       />
       <DayView
         date={dayViewDate}
-        events={displayEvents}
+        events={filteredEvents}
         onClose={() => setDayViewDate(null)}
         onEditEvent={handleDayViewEditEvent}
         onDeleteEvent={handleDayViewDeleteEvent}
